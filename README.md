@@ -51,4 +51,4 @@ The connections between the picos are:
 - This code makes use of the waveshare code for UI and sending MCP2515 messages, the reason for this is because I am using the modules this code was designed for, other modules/or libraries could be used with relative ease.
 - This code also uses 2 Picos when realistically only one could be used to do both the UI and CAN message/response. This would require some modification of the SPI pins being used by one of the modules as by standard they both use SPI0.
 - This code only allows the user to query a small range of PIDs on the vehicle can, adding more would not be a challenge and the PIDs to query and format of the response can be found [here](https://www.csselectronics.com/pages/obd2-pid-table-on-board-diagnostics-j1979).
-
+- I powered the pico through a 12v powered USB port (standard ciggarette lighter usb) inside the car, but use of a step down converter (12v to 5v) could be used to take power directly from the car (OBD2 pin 16) reducing the need for an additional cable outside of the ones already being used.
