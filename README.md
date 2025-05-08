@@ -1,4 +1,4 @@
-# picoOBD2
+# picOBD2
 A project for COMP2215 making use of the provided hardware kit and some additional hardware.
 ## General Overview
 This project allows you to use Pi Picos to communicate with car's ecu to retrieve real time data like RPM or throttle position. 
