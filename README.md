@@ -1,12 +1,12 @@
 # picOBD2
 A project for COMP2215 making use of the provided hardware kit and some additional hardware.
-A link to the project in action is shown [here]() (this is the code in /picoOBD2)
+The project in action can be seen [here](https://youtube.com/shorts/yGXlc7FlCXg?feature=share) (this is the code in /picoOBD2)
 ## General Overview
 This project allows you to use Pi Pico(s) to communicate with car's ecu to retrieve real time data like RPM or throttle position. 
 There are three versions of this project in this repo:
  - one to have the pico communicate with a car and output OBD2 responses to a serial monitor  ([CAN_TEST](https://github.com/ZaneWright05/PICOtoCAN/tree/main/CAN_TEST)),
  - one to have two picos working together, one querying the can frames and another to run the UI and display the infomation, communicating over UART  ([MCP2515Code](https://github.com/ZaneWright05/PICOtoCAN/tree/main/MCP2515Code)) and ([UICode](https://github.com/ZaneWright05/PICOtoCAN/tree/main/UICode)),
- - and a third which combines both the UI and querying, with both modules sharing the pico SPI bus ([picOBD2]()). This is the version that will be kept up to date and worked on further. 
+ - and a third which combines both the UI and querying, with both modules sharing the pico SPI bus ([picOBD2](https://github.com/ZaneWright05/picOBD2/tree/main/picoOBD2)). This is the version that will be kept up to date and worked on further. 
 ## Hardware used
 - Pi pico 2 W and a pico WH (if using two picos)
 - OBD2 Pigtail cable ([amazon link](https://www.amazon.co.uk/dp/B07WSMBSL3?ref=ppx_yo2ov_dt_b_fed_asin_title))<br/>
@@ -31,7 +31,7 @@ For my setup the connections were:
 - pin 6 <-green-> CAN high
 - pin 14 <-brown/white-> CAN low <br/>
 <img src="https://github.com/user-attachments/assets/618e7e91-579f-42d0-9a65-6d32a8f4d1c0" height="250"> <br/>
-  **Note:** if you are running ([CAN_TEST](https://github.com/ZaneWright05/PICOtoCAN/tree/main/CAN_TEST)) or ([picOBD2]()), you can now run the code and disregard the rest of the setup, assuming all connections are correct.
+  **Note:** if you are running ([CAN_TEST](https://github.com/ZaneWright05/PICOtoCAN/tree/main/CAN_TEST)) or ([picOBD2](https://github.com/ZaneWright05/picOBD2/tree/main/picoOBD2)), you can now run the code and disregard the rest of the setup, assuming all connections are correct.
 3. At this point you should flash the MCP2515Code file onto this pico but the CAN_TEST file will also work at this point. When testing the setup both files should outut logs through the serial port.
 4. Now move to the second Pico and attatch the OLED screen. Now jumper cables need to be attatched for the UART communication. For this you will need 3 jumper cables (RX, TX, GND), thier connections will vary depending on your pico headers but in my case I used male to female jumpers. Both files are set up to use UART0 so need you need to connect pins 0 and 1.<br/>
 The connections between the picos are:
