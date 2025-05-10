@@ -1,14 +1,13 @@
 # picOBD2
 A project for COMP2215 making use of the provided hardware kit and some additional hardware.
 ## General Overview
-This project allows you to use Pi Picos to communicate with car's ecu to retrieve real time data like RPM or throttle position. 
-The code is made up of two files:
- - one to run UI and send can messages over UART ([UICode](https://github.com/ZaneWright05/PICOtoCAN/tree/main/UICode))
- - and another to query a CARS ecu by accessing its CAN bus through the obd2 port ([MCP2515Code](https://github.com/ZaneWright05/PICOtoCAN/tree/main/MCP2515Code)).<br/>
-There is also a 3rd file ([CAN_TEST](https://github.com/ZaneWright05/PICOtoCAN/tree/main/CAN_TEST)), this sends CAN frames similarly to the MCP2515Code file but reads commands from and outputs data to a serial monitor via the Pico microUSB port.
+This project allows you to use Pi Pico(s) to communicate with car's ecu to retrieve real time data like RPM or throttle position. 
+There are three versions of this project in this repo:
+ - one to have the pico communicate with a car and output OBD2 responses to a serial monitor  ([CAN_TEST](https://github.com/ZaneWright05/PICOtoCAN/tree/main/CAN_TEST)),
+ - one to have two picos working together, one querying the can frames and another to run the UI and display the infomation, communicating over UART  ([MCP2515Code](https://github.com/ZaneWright05/PICOtoCAN/tree/main/MCP2515Code)) and ([UICode](https://github.com/ZaneWright05/PICOtoCAN/tree/main/UICode)),
+ - and a third which combines both the UI and querying, with both modules sharing the pico SPI bus ([picOBD2]()). This is the version that will be kept up to date and worked on further. 
 ## Hardware used
-- Pi pico 2 W
-- Pi pico WH
+- Pi pico 2 W and a pico WH (if using two picos)
 - OBD2 Pigtail cable ([amazon link](https://www.amazon.co.uk/dp/B07WSMBSL3?ref=ppx_yo2ov_dt_b_fed_asin_title))<br/>
   <img src="https://github.com/user-attachments/assets/10a9105b-ee05-4dee-a7eb-6e798b36af1a" width="250">
 - Waveshare Pico-CAN-B ([wiki](https://www.waveshare.com/wiki/Pico-CAN-B)) <br/>
@@ -31,6 +30,7 @@ For my setup the connections were:
 - pin 6 <-green-> CAN high
 - pin 14 <-brown/white-> CAN low <br/>
 <img src="https://github.com/user-attachments/assets/618e7e91-579f-42d0-9a65-6d32a8f4d1c0" height="250"> <br/>
+  **Note:** if you are running ([CAN_TEST](https://github.com/ZaneWright05/PICOtoCAN/tree/main/CAN_TEST)) or ([picOBD2]()), you can now run the code and disregard the rest of the setup, assuming all connections are correct.
 3. At this point you should flash the MCP2515Code file onto this pico but the CAN_TEST file will also work at this point. When testing the setup both files should outut logs through the serial port.
 4. Now move to the second Pico and attatch the OLED screen. Now jumper cables need to be attatched for the UART communication. For this you will need 3 jumper cables (RX, TX, GND), thier connections will vary depending on your pico headers but in my case I used male to female jumpers. Both files are set up to use UART0 so need you need to connect pins 0 and 1.<br/>
 The connections between the picos are:
@@ -47,8 +47,14 @@ The connections between the picos are:
 ## Usage
 - key0 to shift between the data being queried
 - key1 to select and begin querying (press again to deselect)
+## Known issues
+- in the lastest version of picOBD2 vehicle speed and oil temp are not working (with my setup), more time will need to be spent fine tuning the software and ensuring that the ECU responding supports these PIDS, there are special PIDs that can be sent to retrieve this information, found in the link below.
+## Future extensions
+- web app output and input, instead of relying on a screen use the pico W's ability to host a small webserver to allow the communication.
+- dials use of servos/stepper motors to display the information
+- extension to dynamically allow given PIDs, on start up request supported PIDs then have these be the set that can be queryied
+- display more than one data type at the same time (simultaneous querys are impossible on the CAN bus but alternating the frames sent may allow a relatively fast response)
 ## Sidenotes
 - This code makes use of the waveshare code for UI and sending MCP2515 messages, the reason for this is because I am using the modules this code was designed for, other modules/or libraries could be used with relative ease.
-- This code also uses 2 Picos when realistically only one could be used to do both the UI and CAN message/response. This would require some modification of the SPI pins being used by one of the modules as by standard they both use SPI0.
 - This code only allows the user to query a small range of PIDs on the vehicle can, adding more would not be a challenge and the PIDs to query and format of the response can be found [here](https://www.csselectronics.com/pages/obd2-pid-table-on-board-diagnostics-j1979).
 - I powered the pico through a 12v powered USB port (standard ciggarette lighter usb) inside the car, but use of a step down converter (12v to 5v) could be used to take power directly from the car (OBD2 pin 16) reducing the need for an additional cable outside of the ones already being used.
