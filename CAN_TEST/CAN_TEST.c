@@ -118,6 +118,20 @@ bool check_Stop(){
     return false;
 }
 
+bool checksuppPID1(uint16_t* can_out){
+    uint8_t SUPPID_CAN[8] = {0x02, 0x01, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00};
+    uint8_t CAN_RESP_BUFF[8] = {0};
+    MCP2515_Send(0x7DF, SUPPID_CAN, 8);
+    MCP2515_Receive(0x7E8, CAN_RESP_BUFF);
+
+    if (CAN_RESP_BUFF[1] == 0x41 && CAN_RESP_BUFF[2] == 0x40) {
+        printf("Supported PIDs: ");
+        printf("first byte is %02X, second byte is %02X\n", CAN_RESP_BUFF[3], CAN_RESP_BUFF[4]);
+        printf("third byte is %02X, fourth byte is %02X\n", CAN_RESP_BUFF[5], CAN_RESP_BUFF[6]);
+        return true;
+    }
+    return false;
+}
 
 
 int main()
@@ -224,6 +238,17 @@ int main()
         
                 if(check_Stop()) break;
             }
+        } else if (strcmp(input, "CHECK") == 0){
+            printf("Checking supported PIDs. Type 'stop' to return.\n");
+                uint16_t can_out;
+                if (checksuppPID1(&can_out)) {
+                    printf("Supported PIDs checked.\n");
+                } else {
+                    printf("Failed to check supported PIDs.\n");
+                }
+                sleep_ms(100);
+
+                if(check_Stop()) break;
         }else {
             printf("Unknown command: %s\n", input);
         }

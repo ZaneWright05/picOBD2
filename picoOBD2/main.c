@@ -38,7 +38,7 @@ int query_CAN(uint8_t PID) { // needs to take the can ID (not 7df but the val st
             case 0x04: return reply[3] * 100 / 255; // Engine load
             case 0x05: return reply[3] - 40; // Coolant Temp
             case 0x0F: return reply[3] - 40; // Intake Temp
-            case 0x5C: return reply[3] - 40; // Oil Temp
+            // case 0x5C: return reply[3] - 40; // Oil Temp not supportedby rav 4
             case 0x0B: return reply[3]; // Manifold Air Pressure
             case 0x33: return reply[3]; // Absolute Pressure
             default: return 0; // Unsupported PID
