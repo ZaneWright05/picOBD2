@@ -9,14 +9,6 @@
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
 
-// UART config to communicate with the second pico
-#define UART_ID uart0
-#define UART_BAUD_RATE 115200
-#define UART_TX_PIN 1
-#define UART_RX_PIN 2
-
-#define SYNC_BYTE 0xAA
-
 // can ID to mean no request
 uint8_t canID = 0x00;
 uint16_t store = 0;
@@ -29,56 +21,77 @@ struct Mode{
     char* unit; // unit to display
 };
 
-void setupUART(){
-    uart_init(UART_ID, UART_BAUD_RATE);
-    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+volatile bool key0Pressed = false;
+volatile bool key1Pressed = false;
+
+// these are used to debounce the keys
+absolute_time_t lastKey0Time;
+absolute_time_t lastKey1Time;
+
+const uint64_t debounceDelayUs = 200000; // 200ms
+
+void handleKey0Press() {
+    absolute_time_t now = get_absolute_time();
+    if (absolute_time_diff_us(lastKey0Time, now) < debounceDelayUs) {
+        return;
+    }
+    lastKey0Time = now;
+    key0Pressed = true;
 }
 
-int receive_uint16_with_header(uint16_t* out_value) {
-    *out_value = 0;
-    int timeout = 50000; // 50ms
-    absolute_time_t start = get_absolute_time();
+void handleKey1Press() {
+    absolute_time_t now = get_absolute_time();
+    if (absolute_time_diff_us(lastKey1Time, now) < debounceDelayUs) {
+        return;
+    }
+    lastKey1Time = now;
+    key1Pressed = true;
+}
 
-    // dont wait forever to avoid blocking the UI
-    while (absolute_time_diff_us(start, get_absolute_time()) < timeout) {
-        if(uart_is_readable(UART_ID)){
-            uint8_t byte = uart_getc(UART_ID);
-            printf("Byte: %02X\n", byte);
-            if (byte == SYNC_BYTE) { // msgs sent by the second pico start with 0xAA
-                // read the next two bytes
-                while (!uart_is_readable(UART_ID)){
-                    if(absolute_time_diff_us(start, get_absolute_time()) >= timeout) {
-                        return 0;
-                    }
-                }
-                uint8_t high = uart_getc(UART_ID);
-
-                while (!uart_is_readable(UART_ID)){
-                    if(absolute_time_diff_us(start, get_absolute_time()) >= timeout) {
-                        return 0;
-                    }
-                }
-                uint8_t low = uart_getc(UART_ID);
-
-                *out_value = ((uint16_t)high << 8) | low; // combine high and low bytes
-                return 1;
-        }
+void gpio_callback(uint gpio, uint32_t events) {
+    if (gpio == KEY0) {
+        handleKey0Press();
+    } else if (gpio == KEY1) {
+        handleKey1Press();
     }
 }
-    return 0;
+
+int menuScreen(UBYTE *image){
+    int selected = 0;
+    int numMenuItems = 4;
+    char **menuItems = (char **)malloc(numMenuItems * sizeof(char *));
+    if (menuItems == NULL) {
+        printf("Failed to allocate menuItems\n");
+        exit(1);
+    }
+    menuItems[0] = strdup("Real-time data");
+    menuItems[1] = strdup("Settings");
+    menuItems[2] = strdup("Add car");
+    menuItems[3] = strdup("CAR 1");
+    while (1){
+        Paint_SelectImage(image);
+        Paint_Clear(BLACK);
+        Paint_DrawString_EN(0, 0, "Main Menu", &Font16, WHITE, BLACK);
+        Paint_DrawString_EN(0, 20, menuItems[selected], &Font16, WHITE, BLACK);
+        OLED_1in3_C_Display(image);
+        if (key0Pressed) {
+            key0Pressed = false;
+            selected = (selected + 1) % numMenuItems;
+        }
+        if  (key1Pressed) {
+            key1Pressed = false;
+            break;
+        }
+    }
+    for (int i = 0; i < numMenuItems; i++) {
+        free(menuItems[i]);
+    }
+    free(menuItems);
+    return selected;
 }
 
-// function to send the CAN ID to the second pico
-void send_mode_command(uint8_t canID) {
-    char msg[20];
-    snprintf(msg, sizeof(msg), "MODE:%02X\n", canID);  
-    uart_puts(UART_ID, msg);
-    printf("Sent mode command: %s", msg);
-}
-
-int main(void)
-{   
+void realTimeDataScreen(UBYTE *BlackImage) {
+    
     // mode array to hold the different modes
     struct Mode mode[6] = {
         {"Eng Speed", 0x0C, "rpm"},
@@ -88,57 +101,16 @@ int main(void)
         {"Thrttl Pos", 0x11, "%"},
         {"Engine load", 0x04, "%"}
     };
-    
-    DEV_Delay_ms(100);
-    
-    if(DEV_Module_Init()!=0){
-        while(1){
-            printf("END\r\n");
-        }
-    }
-    
-    stdio_init_all();
-    setupUART();
-    DEV_Delay_ms(100);
-    OLED_1in3_C_Init();
-    OLED_1in3_C_Clear();
-    
-    // UI setup from waveshare: https://www.waveshare.com/wiki/Pico-OLED-1.3#Overview
-    UBYTE *BlackImage;
-    UWORD Imagesize = ((OLED_1in3_C_WIDTH%8==0)? (OLED_1in3_C_WIDTH/8): (OLED_1in3_C_WIDTH/8+1)) * OLED_1in3_C_HEIGHT;
-    if((BlackImage = (UBYTE *)malloc(Imagesize)) == NULL) {
-        while(1){
-            printf("Failed to apply for black memory...\r\n");
-        }
-    }
-    Paint_NewImage(BlackImage, OLED_1in3_C_WIDTH, OLED_1in3_C_HEIGHT, 0, WHITE);	
-    
-    Paint_SelectImage(BlackImage);
-    DEV_Delay_ms(500);
-    Paint_Clear(BLACK);
-
-    OLED_1in3_C_Display(BlackImage);
-
-    // varaible to check if keys are pressed
-    int key1act = 0; 
-    int key0act = 0;
-    
-    DEV_GPIO_Mode(KEY0, 0);
-    DEV_GPIO_Mode(KEY1, 0);
-
-    // index in mode array
-    int current = 0;
-
-    // varaible to check if the screen is toggled on/off
-    int visible = true;
-    // varaible to check if the a mode is selected
-    bool selected = false;
-
-    // varibale to hold the response
-    char valStr[10];
-    absolute_time_t start = get_absolute_time();
+    int current = 0; // current mode index
+    bool visible = true; // toggle visibility of the name and unit
+    bool selected = false; // if the mode is selected
+    int key0act = 0; // key0 action state
+    int key1act = 0; // key1 action state
+    char valStr[10] = "0"; // value string to display
+    uint8_t canID = 0x00; // CAN ID to send, 0x00 means no request
+    absolute_time_t start = get_absolute_time(); // timer for toggling the screen
     while(1){
-        Paint_SelectImage(BlackImage);
+      Paint_SelectImage(BlackImage);
         Paint_Clear(BLACK);
 
         if (visible && selected == false) { // show name and unit and instructions
@@ -150,12 +122,12 @@ int main(void)
         } else{
             if(selected){ // toggle disabled
                 Paint_DrawString_EN(0, 0, mode[current].name, &Font16, WHITE, BLACK); // show name
-                if(receive_uint16_with_header(&store)){ //  get new data, if true its updated
-                    printf("Received: %x\r\n", store);
-                    snprintf(valStr, sizeof(valStr), "%u", store); // convert to string
-                    printf("valStr: %s\r\n", valStr);
-                    Paint_DrawString_EN(0, 17, valStr, &Font16, WHITE, BLACK); // show value
-                } else{
+                // if(receive_uint16_with_header(&store)){ //  get new data, if true its updated
+                //     printf("Received: %x\r\n", store);
+                //     snprintf(valStr, sizeof(valStr), "%u", store); // convert to string
+                //     printf("valStr: %s\r\n", valStr);
+                //     Paint_DrawString_EN(0, 17, valStr, &Font16, WHITE, BLACK); // show value
+                // } else{
                     printf("No data received: %s\r\n", valStr);
                     Paint_DrawString_EN(0, 17, valStr, &Font16, WHITE, BLACK); // show old value to make it look consistent
                 }
@@ -166,7 +138,6 @@ int main(void)
             Paint_DrawLine(0, 35, OLED_1in3_C_WIDTH, 35, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
             Paint_DrawString_EN(0, 37, "0 for mode" , &Font12, WHITE, BLACK);
             Paint_DrawString_EN(0, 49, "1 to select", &Font12, WHITE, BLACK);
-        }
 
         OLED_1in3_C_Display(BlackImage);
 
@@ -190,7 +161,7 @@ int main(void)
                 if(selected){
                     if(canID != mode[current].id){
                         canID = mode[current].id;
-                        send_mode_command(canID);
+                        // send_mode_command(canID);
                         printf("CAN ID set to: %x\r\n", canID);
                     }
                 }
@@ -222,6 +193,93 @@ int main(void)
                 key0act = 0;
             }
         }
+    }
+}
+
+int main(void)
+{   
+    DEV_Delay_ms(100);
+    
+    if(DEV_Module_Init()!=0){
+        while(1){
+            printf("END\r\n");
+        }
+    }
+    
+    stdio_init_all();
+    // setupUART();
+    DEV_Delay_ms(100);
+    OLED_1in3_C_Init();
+    OLED_1in3_C_Clear();
+
+    // while(!stdio_usb_connected()) {
+    //     sleep_ms(100); // wait for USB to be connected
+    // }
+    
+    // UI setup from waveshare: https://www.waveshare.com/wiki/Pico-OLED-1.3#Overview
+    UBYTE *BlackImage;
+    UWORD Imagesize = ((OLED_1in3_C_WIDTH%8==0)? (OLED_1in3_C_WIDTH/8): (OLED_1in3_C_WIDTH/8+1)) * OLED_1in3_C_HEIGHT;
+    if((BlackImage = (UBYTE *)malloc(Imagesize)) == NULL) {
+        while(1){
+            printf("Failed to apply for black memory...\r\n");
+        }
+    }
+    Paint_NewImage(BlackImage, OLED_1in3_C_WIDTH, OLED_1in3_C_HEIGHT, 0, WHITE);	
+    
+    Paint_SelectImage(BlackImage);
+    DEV_Delay_ms(500);
+    Paint_Clear(BLACK);
+
+    OLED_1in3_C_Display(BlackImage);
+    
+    DEV_KEY_Config(KEY0);
+    gpio_set_irq_enabled_with_callback(KEY0, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
+
+    DEV_KEY_Config(KEY1);
+    gpio_set_irq_enabled(KEY1, GPIO_IRQ_EDGE_FALL, true); 
+
+    absolute_time_t start = get_absolute_time();
+    int mode = 0;
+    while(mode < 2) {
+        absolute_time_t now = get_absolute_time();
+        uint64_t elapsed_time = absolute_time_diff_us(start, now);
+        // printf("Elapsed time: %d us\n", elapsed_time);
+        Paint_SelectImage(BlackImage);
+        Paint_Clear(BLACK);
+        if(mode == 0){
+            Paint_DrawString_EN(0, 0, "picOBD2", &Font24, WHITE, BLACK);
+        }
+        else {
+            Paint_DrawString_EN(0, 0, "Welcome:", &Font16, WHITE, BLACK);
+            Paint_DrawString_EN(10, 30, "<user>", &Font12, WHITE, BLACK);
+        } 
+
+        OLED_1in3_C_Display(BlackImage);
+        if (elapsed_time >= 2000000 || key0Pressed || key1Pressed){
+            start = now;
+            mode++;
+            key0Pressed = false;
+            key1Pressed = false;
+        }
+    }
+    printf("Entering menu screen...\n");
+    int choice = menuScreen(BlackImage); // enter the menu screen loop
+    switch (choice)
+    {
+    case 0: // rt data
+        printf("Entering real-time data screen...\n");
+        realTimeDataScreen(BlackImage);
+        break;
+    case 1: // settings
+        printf("Entering settings screen...\n");
+        break;
+    case 2: // add car
+        printf("Entering add car screen...\n");
+        break;
+    default:
+        printf("Entering car screen...\n");
+        // based on the choice, can determine which car to show
+        break;
     }
     return 0;
 }
