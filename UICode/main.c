@@ -196,6 +196,109 @@ void realTimeDataScreen(UBYTE *BlackImage) {
     }
 }
 
+char convertToChar(int value) {
+    if (value == -1) {
+        return ' '; // return space for unselected characters
+    }
+    if (value >= 0 && value <= 25){
+        return 'A' + value; // convert 0-25 to A-Z
+    } else if (value >= 26 && value <= 35) {
+        return '0' + (value - 26); // convert 26-35 to 0-9
+    } else {
+        return '?'; // return '?' for invalid values
+    }
+}
+
+char* name_Car(UBYTE *BlackImage){
+    int lineWidth = (OLED_1in3_C_WIDTH - 20)/ 8; // width of the line
+    absolute_time_t start = get_absolute_time();
+    bool visible = true; // toggle for the selected 
+    int selected = 0; // selected character index
+    int* characters = (int*)malloc(8 * sizeof(int)); // array to hold the characters
+    for (int i = 0; i < 8; i++) {
+        characters[i] = -1;
+    }
+    while (1) {
+        absolute_time_t now = get_absolute_time();
+        uint64_t elapsed_time = absolute_time_diff_us(start, now);
+        if (elapsed_time >= 500000) { // 500ms
+            start = now;
+            visible = !visible; // toggle visibility
+        }
+        Paint_SelectImage(BlackImage);
+        Paint_Clear(BLACK);
+        Paint_DrawString_EN(0, 0, "Enter Name:", &Font16, WHITE, BLACK);
+        int y = 40;
+        for (int i = 0; i < 8; i++) {
+            int x1 = 2 + i * 16;
+            int x2 = x1 + 12;
+            char charStr[2] = {convertToChar(characters[i]), '\0'};
+            Paint_DrawString_EN(x1, y - 15, charStr, &Font16, WHITE, BLACK);
+            if(i == selected && !visible){
+                continue;
+            }
+            Paint_DrawLine(x1, y, x2, y, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+        }  
+        Paint_DrawString_EN(0, y + 5, "0 for next", &Font8, WHITE, BLACK);
+        Paint_DrawString_EN(0, y + 13, "1 to change/select", &Font8, WHITE, BLACK);
+        if(selected == 8){
+            if (visible) {
+                // Paint_DrawRectangle(OLED_1in3_C_WIDTH - 28 , y + 5, OLED_1in3_C_WIDTH - 2, y + 15, WHITE, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
+                Paint_DrawString_EN(OLED_1in3_C_WIDTH - 28 , y + 10, "Done?", &Font8, WHITE, BLACK);
+            }
+        } else {
+            Paint_DrawString_EN(OLED_1in3_C_WIDTH - 28 , y + 10, "Done?", &Font8, WHITE, BLACK);
+        }
+        Paint_DrawRectangle(OLED_1in3_C_WIDTH - 30 , y + 8, OLED_1in3_C_WIDTH - 2, y + 20, WHITE, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
+
+        if(key0Pressed) {
+            key0Pressed = false;
+            selected = (selected + 1) % 9; // move to the next character
+        }
+        if(key1Pressed) {
+            key1Pressed = false;
+            bool isDone = false;
+            if (selected == 8) { // if the last character is selected, exit
+                for (int i = 0; i < 8; i++) {
+                    if (characters[i] != -1) { // if any character is selected
+                        isDone = true;
+                        break;
+                    }
+                }
+                if (isDone){
+                    break;
+                }
+            }
+            else {
+                int currChar = characters[selected];
+                if(currChar == 35){
+                    currChar = -1; // if the character is 36, set it to -1 (space)
+                } else if(currChar == -1) {
+                    currChar = 0; // if the character is -1, set it to 0 (A)
+                } else {
+                    currChar++;
+                }
+                characters[selected] = currChar; // 0-25 for A-Z, 26-35 for 0-9
+            }
+        }
+        OLED_1in3_C_Display(BlackImage);
+    }
+    // printf("Selected characters: ");
+    char* name = (char *) malloc(sizeof(char) * 9); // 8 chars + null terminator
+    for (int i = 0; i < 8; i++) {
+        if (characters[i] == -1) {
+            name[i] = ' ';
+        } else {
+            name[i] = convertToChar(characters[i]);
+            // printf("%c", convertToChar(characters[i]));
+        }
+    }
+    name[8] = '\0'; // null-terminate the string
+    // printf("\n");
+    free(characters);
+    return name;
+}
+
 int main(void)
 {   
     DEV_Delay_ms(100);
@@ -263,23 +366,28 @@ int main(void)
         }
     }
     printf("Entering menu screen...\n");
-    int choice = menuScreen(BlackImage); // enter the menu screen loop
-    switch (choice)
-    {
-    case 0: // rt data
-        printf("Entering real-time data screen...\n");
-        realTimeDataScreen(BlackImage);
-        break;
-    case 1: // settings
-        printf("Entering settings screen...\n");
-        break;
-    case 2: // add car
-        printf("Entering add car screen...\n");
-        break;
-    default:
-        printf("Entering car screen...\n");
-        // based on the choice, can determine which car to show
-        break;
+    while (1) {
+        int choice = menuScreen(BlackImage); // enter the menu screen loop
+        switch (choice)
+        {
+        case 0: // rt data
+            printf("Entering real-time data screen...\n");
+            realTimeDataScreen(BlackImage);
+            break;
+        case 1: // settings
+            printf("Entering settings screen...\n");
+            break;
+        case 2: // add car
+            printf("Entering add car screen...\n");
+            char *carName = name_Car(BlackImage); // enter the name car screen
+            printf("Car name entered: %s\n", carName);
+            free(carName); // free the car name string
+            break;
+        default:
+            printf("Entering car screen...\n");
+            // based on the choice, can determine which car to show
+            break;
+        }
     }
     return 0;
 }
