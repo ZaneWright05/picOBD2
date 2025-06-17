@@ -9,10 +9,6 @@
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
 
-// can ID to mean no request
-uint8_t canID = 0x00;
-uint16_t store = 0;
-
 UWORD imageBuffer[OLED_1in3_C_WIDTH * OLED_1in3_C_HEIGHT / 8];
 
 struct Mode{
@@ -56,37 +52,23 @@ void gpio_callback(uint gpio, uint32_t events) {
     }
 }
 
-int menuScreen(UBYTE *image){
+int menuScreen(UBYTE *image, int numScreens, char** screens) {
     int selected = 0;
-    int numMenuItems = 4;
-    char **menuItems = (char **)malloc(numMenuItems * sizeof(char *));
-    if (menuItems == NULL) {
-        printf("Failed to allocate menuItems\n");
-        exit(1);
-    }
-    menuItems[0] = strdup("Real-time data");
-    menuItems[1] = strdup("Settings");
-    menuItems[2] = strdup("Add car");
-    menuItems[3] = strdup("CAR 1");
     while (1){
         Paint_SelectImage(image);
         Paint_Clear(BLACK);
         Paint_DrawString_EN(0, 0, "Main Menu", &Font16, WHITE, BLACK);
-        Paint_DrawString_EN(0, 20, menuItems[selected], &Font16, WHITE, BLACK);
+        Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
         OLED_1in3_C_Display(image);
         if (key0Pressed) {
             key0Pressed = false;
-            selected = (selected + 1) % numMenuItems;
+            selected = (selected + 1) % numScreens;
         }
         if  (key1Pressed) {
             key1Pressed = false;
             break;
         }
     }
-    for (int i = 0; i < numMenuItems; i++) {
-        free(menuItems[i]);
-    }
-    free(menuItems);
     return selected;
 }
 
@@ -122,12 +104,6 @@ void realTimeDataScreen(UBYTE *BlackImage) {
         } else{
             if(selected){ // toggle disabled
                 Paint_DrawString_EN(0, 0, mode[current].name, &Font16, WHITE, BLACK); // show name
-                // if(receive_uint16_with_header(&store)){ //  get new data, if true its updated
-                //     printf("Received: %x\r\n", store);
-                //     snprintf(valStr, sizeof(valStr), "%u", store); // convert to string
-                //     printf("valStr: %s\r\n", valStr);
-                //     Paint_DrawString_EN(0, 17, valStr, &Font16, WHITE, BLACK); // show value
-                // } else{
                     printf("No data received: %s\r\n", valStr);
                     Paint_DrawString_EN(0, 17, valStr, &Font16, WHITE, BLACK); // show old value to make it look consistent
                 }
@@ -214,10 +190,7 @@ char* name_Car(UBYTE *BlackImage){
     absolute_time_t start = get_absolute_time();
     bool visible = true; // toggle for the selected 
     int selected = 0; // selected character index
-    int* characters = (int*)malloc(8 * sizeof(int)); // array to hold the characters
-    for (int i = 0; i < 8; i++) {
-        characters[i] = -1;
-    }
+    int characters[8] = {-1,-1,-1,-1,-1,-1,-1,-1}; // array to hold the characters
     while (1) {
         absolute_time_t now = get_absolute_time();
         uint64_t elapsed_time = absolute_time_diff_us(start, now);
@@ -283,8 +256,8 @@ char* name_Car(UBYTE *BlackImage){
         }
         OLED_1in3_C_Display(BlackImage);
     }
-    // printf("Selected characters: ");
-    char* name = (char *) malloc(sizeof(char) * 9); // 8 chars + null terminator
+    char *name = malloc(9);
+    if (!name) return NULL;
     for (int i = 0; i < 8; i++) {
         if (characters[i] == -1) {
             name[i] = ' ';
@@ -294,8 +267,6 @@ char* name_Car(UBYTE *BlackImage){
         }
     }
     name[8] = '\0'; // null-terminate the string
-    // printf("\n");
-    free(characters);
     return name;
 }
 
@@ -366,10 +337,14 @@ int main(void)
         }
     }
     printf("Entering menu screen...\n");
+    int numOfScreens = 3; // number of screens in the menu
+    char** screens = (char**)malloc(numOfScreens * sizeof(char*)); // allocate memory for the screens
+    screens[0] = "Real-time data";
+    screens[1] = "Settings";
+    screens[2] = "Add car";
     while (1) {
-        int choice = menuScreen(BlackImage); // enter the menu screen loop
-        switch (choice)
-        {
+        int choice = menuScreen(BlackImage, numOfScreens, screens); // enter the menu screen loop
+        switch (choice){
         case 0: // rt data
             printf("Entering real-time data screen...\n");
             realTimeDataScreen(BlackImage);
@@ -381,7 +356,17 @@ int main(void)
             printf("Entering add car screen...\n");
             char *carName = name_Car(BlackImage); // enter the name car screen
             printf("Car name entered: %s\n", carName);
-            free(carName); // free the car name string
+    
+            char** temp = (char**)realloc(screens, (numOfScreens + 1) * sizeof(char*)); // reallocate memory for the screens
+            if(temp == NULL || carName == NULL) {
+                screens[numOfScreens - 1] = "ERR";
+            }
+            else {
+                screens = temp;
+                screens[numOfScreens] = strdup(carName);
+                numOfScreens++;
+            }
+            free(carName);
             break;
         default:
             printf("Entering car screen...\n");
@@ -389,5 +374,12 @@ int main(void)
             break;
         }
     }
+    for (int i = 0; i < numOfScreens; i++) {
+        if (screens[i] != NULL) {
+            free(screens[i]);
+        }
+    }
+    free(screens); // free the screens memory
+    free(BlackImage); // free the black image memory
     return 0;
 }
