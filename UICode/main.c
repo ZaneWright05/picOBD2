@@ -5,6 +5,8 @@
 #include "GUI_Paint.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
+#include "sd_card.h"
+#include "ff.h"
 
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
@@ -17,8 +19,10 @@ struct Mode{
     char* unit; // unit to display
 };
 
-volatile bool key0Pressed = false;
-volatile bool key1Pressed = false;
+// volatile
+bool key0Pressed = false;
+// volatile 
+bool key1Pressed = false;
 
 // these are used to debounce the keys
 absolute_time_t lastKey0Time;
@@ -44,6 +48,19 @@ void handleKey1Press() {
     key1Pressed = true;
 }
 
+void pollButtons(){
+    if(DEV_Digital_Read(KEY0) == 0) {
+        handleKey0Press();
+    } else {
+        key0Pressed = false; 
+    }
+    if(DEV_Digital_Read(KEY1) == 0) {
+        handleKey1Press();
+    } else {
+        key1Pressed = false;
+    }
+}
+
 void gpio_callback(uint gpio, uint32_t events) {
     if (gpio == KEY0) {
         handleKey0Press();
@@ -60,6 +77,7 @@ int menuScreen(UBYTE *image, int numScreens, char** screens) {
         Paint_DrawString_EN(0, 0, "Main Menu", &Font16, WHITE, BLACK);
         Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
         OLED_1in3_C_Display(image);
+        pollButtons();
         if (key0Pressed) {
             key0Pressed = false;
             selected = (selected + 1) % numScreens;
@@ -75,13 +93,14 @@ int menuScreen(UBYTE *image, int numScreens, char** screens) {
 void realTimeDataScreen(UBYTE *BlackImage) {
     
     // mode array to hold the different modes
-    struct Mode mode[6] = {
+    struct Mode mode[7] = {
         {"Eng Speed", 0x0C, "rpm"},
         {"Veh Speed", 0x0D, "km/h"},
         {"Intake temp", 0x0F, "C"},
         {"Clnt temp", 0x05, "C"},
         {"Thrttl Pos", 0x11, "%"},
-        {"Engine load", 0x04, "%"}
+        {"Engine load", 0x04, "%"},
+        {"BACK", 0x00, ""}
     };
     int current = 0; // current mode index
     bool visible = true; // toggle visibility of the name and unit
@@ -141,6 +160,9 @@ void realTimeDataScreen(UBYTE *BlackImage) {
                         printf("CAN ID set to: %x\r\n", canID);
                     }
                 }
+                if(mode[current].id == 0x00){
+                    return;
+                }
                 //  else{ // needs to be tested -> will stop 2nd pico the old request
                 //     send_mode_command(0x00); // send 0 to stop the request
                 //     canID = 0x00;
@@ -160,7 +182,7 @@ void realTimeDataScreen(UBYTE *BlackImage) {
             if(key0act == 0 && !selected){
                 printf("key0 pressed\r\n");
                 // move to the next mode
-                current = (current + 1) % 6;
+                current = (current + 1) % 7;
                 key0act = 1;    
                 sleep_ms(50);
             }
@@ -223,7 +245,8 @@ char* name_Car(UBYTE *BlackImage){
             Paint_DrawString_EN(OLED_1in3_C_WIDTH - 28 , y + 10, "Done?", &Font8, WHITE, BLACK);
         }
         Paint_DrawRectangle(OLED_1in3_C_WIDTH - 30 , y + 8, OLED_1in3_C_WIDTH - 2, y + 20, WHITE, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
-
+        
+        pollButtons();
         if(key0Pressed) {
             key0Pressed = false;
             selected = (selected + 1) % 9; // move to the next character
@@ -279,18 +302,45 @@ int main(void)
             printf("END\r\n");
         }
     }
-    
+
+    DEV_KEY_Config(KEY0);
+    // gpio_set_irq_enabled_with_callback(KEY0, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
+    DEV_KEY_Config(KEY1);
+    // gpio_set_irq_enabled(KEY1, GPIO_IRQ_EDGE_FALL, true); 
+    // gpio_set_irq_enabled_with_callback(KEY1, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
+
     stdio_init_all();
-    // setupUART();
+    // while(!stdio_usb_connected()) {
+    //     sleep_ms(100); // wait for USB to be connected
+    // }
+
+
+    FRESULT fr;
+    FATFS fs;
+    FIL fil;
+    DWORD nclst;
+    int ret;
+    char buf[100];
+
+
+    bool sd_card_found = true;
+    char userName[8] = "<user>"; // default user name
+    // bool sdInit = sd_init_driver();
+    // printf("SD card driver initialized: %s\r\n", sdInit ? "true" : "false");
+     printf("Initializing SD card...\n");
+    if (!sd_init_driver()) {
+        printf("ERROR: Could not initialize SD card");
+        sd_card_found = false;
+    }
+    // printf("SD card initialized successfully.\n");
+
+
     DEV_Delay_ms(100);
     OLED_1in3_C_Init();
     OLED_1in3_C_Clear();
 
-    // while(!stdio_usb_connected()) {
-    //     sleep_ms(100); // wait for USB to be connected
-    // }
     
-    // UI setup from waveshare: https://www.waveshare.com/wiki/Pico-OLED-1.3#Overview
+    // // UI setup from waveshare: https://www.waveshare.com/wiki/Pico-OLED-1.3#Overview
     UBYTE *BlackImage;
     UWORD Imagesize = ((OLED_1in3_C_WIDTH%8==0)? (OLED_1in3_C_WIDTH/8): (OLED_1in3_C_WIDTH/8+1)) * OLED_1in3_C_HEIGHT;
     if((BlackImage = (UBYTE *)malloc(Imagesize)) == NULL) {
@@ -306,18 +356,42 @@ int main(void)
 
     OLED_1in3_C_Display(BlackImage);
     
-    DEV_KEY_Config(KEY0);
-    gpio_set_irq_enabled_with_callback(KEY0, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
-
-    DEV_KEY_Config(KEY1);
-    gpio_set_irq_enabled(KEY1, GPIO_IRQ_EDGE_FALL, true); 
+    printf("SD card initialized successfully.\r\n");
+    if(sd_card_found){
+    fr = f_mount(&fs, "0:", 1);
+        if (fr != FR_OK) {
+            printf("ERROR: Could not mount filesystem (%d)\r\n", fr);
+            sd_card_found = false;
+        }
+        if(sd_card_found){
+            fr = f_open(&fil, "config.txt", FA_READ);
+            if (fr != FR_OK) {
+                sd_card_found = false;
+            }
+            else{
+                while (f_gets(buf, sizeof(buf), &fil)) {
+                    if (strncmp(buf, "username=", 9) == 0){
+                        char *name = buf + 9; // skip "username="
+                        name[strcspn(name, "\r\n")] = '\0'; // remove newline characters
+                        if (strlen(name) > 0 && strlen(name) < 8) {
+                            strncpy(userName, name, sizeof(userName) - 1);
+                            userName[sizeof(userName) - 1] = '\0'; // ensure null termination
+                        } else {
+                            printf("ERROR: Invalid username in config.txt\r\n");
+                        }
+                        break;
+                    }
+                }       
+            }
+    }
+    }
 
     absolute_time_t start = get_absolute_time();
     int mode = 0;
+    
     while(mode < 2) {
         absolute_time_t now = get_absolute_time();
         uint64_t elapsed_time = absolute_time_diff_us(start, now);
-        // printf("Elapsed time: %d us\n", elapsed_time);
         Paint_SelectImage(BlackImage);
         Paint_Clear(BLACK);
         if(mode == 0){
@@ -325,8 +399,9 @@ int main(void)
         }
         else {
             Paint_DrawString_EN(0, 0, "Welcome:", &Font16, WHITE, BLACK);
-            Paint_DrawString_EN(10, 30, "<user>", &Font12, WHITE, BLACK);
+            Paint_DrawString_EN(10, 30, userName, &Font12, WHITE, BLACK);
         } 
+        pollButtons();
 
         OLED_1in3_C_Display(BlackImage);
         if (elapsed_time >= 2000000 || key0Pressed || key1Pressed){
@@ -339,9 +414,9 @@ int main(void)
     printf("Entering menu screen...\n");
     int numOfScreens = 3; // number of screens in the menu
     char** screens = (char**)malloc(numOfScreens * sizeof(char*)); // allocate memory for the screens
-    screens[0] = "Real-time data";
-    screens[1] = "Settings";
-    screens[2] = "Add car";
+    screens[0] = "QUICK       QUERY"; // spacing to use new line
+    screens[1] = "SETTINGS";
+    screens[2] = "ADD CAR";
     while (1) {
         int choice = menuScreen(BlackImage, numOfScreens, screens); // enter the menu screen loop
         switch (choice){

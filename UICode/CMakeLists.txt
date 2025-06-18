@@ -24,6 +24,7 @@ add_subdirectory(lib/Config)
 add_subdirectory(lib/OLED)
 add_subdirectory(lib/Fonts)
 add_subdirectory(lib/GUI)
+add_subdirectory(lib/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
 # add_subdirectory(examples)
 
 
@@ -37,6 +38,7 @@ include_directories(./lib/OLED)
 # generate executable file
 add_executable(UICode 
 main.c
+hw_config.c
 )
 
 # enable usb output, disable uart output
@@ -46,4 +48,11 @@ pico_enable_stdio_uart(UICode 1)
 # create map/bin/hex/uf2 file etc.
 pico_add_extra_outputs(UICode)
 
-target_link_libraries(UICode OLED GUI Fonts Config pico_stdlib hardware_spi)
+target_link_libraries(UICode
+            OLED
+            GUI
+            Fonts
+            Config
+            pico_stdlib
+            hardware_spi
+            FatFs_SPI)
