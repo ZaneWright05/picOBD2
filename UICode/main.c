@@ -5,8 +5,7 @@
 #include "GUI_Paint.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
-#include "sd_card.h"
-#include "ff.h"
+
 
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
@@ -146,49 +145,31 @@ void realTimeDataScreen(UBYTE *BlackImage) {
                 visible = true;
             }
         }
-
+        pollButtons();
         // button presses
-        if(DEV_Digital_Read(KEY1) == 0){
-            if(key1act == 0){
-                printf("key1 pressed\r\n");
-                // toggle the flashing
-                selected = !selected; 
-                if(selected){
-                    if(canID != mode[current].id){
-                        canID = mode[current].id;
-                        // send_mode_command(canID);
-                        printf("CAN ID set to: %x\r\n", canID);
-                    }
-                }
-                if(mode[current].id == 0x00){
-                    return;
-                }
-                //  else{ // needs to be tested -> will stop 2nd pico the old request
-                //     send_mode_command(0x00); // send 0 to stop the request
-                //     canID = 0x00;
-                //     printf("CAN ID set to: %x\r\n", canID);
-                key1act = 1;  
-                sleep_ms(50); // debounce
+        if(key0Pressed) {
+            key0Pressed = false;
+            if (selected) { // if selected, change mode
+                canID = 0x00; // reset CAN ID
+                selected = false; // unselect
+                key0act = 0; // reset action state
+            } else {
+                current = (current + 1) % 7; // change mode
+                canID = mode[current].id; // set CAN ID
+                key0act = 1; // set action state to change mode
             }
-        }else {
-            // if the key is released, set the action to 0
-            if(key1act == 1){
-                key1act = 0;
-            }
-            
         }
-            
-        if(DEV_Digital_Read(KEY0) == 0){
-            if(key0act == 0 && !selected){
-                printf("key0 pressed\r\n");
-                // move to the next mode
-                current = (current + 1) % 7;
-                key0act = 1;    
-                sleep_ms(50);
+        if(key1Pressed) {
+            key1Pressed = false;
+            if (current == 6) { // if BACK is selected, exit
+                return;
             }
-        }else {
-            if(key0act == 1){
-                key0act = 0;
+            if (selected) { // if selected, send request
+                selected = false; // unselect
+                key1act = 0; // reset action state
+            } else {
+                selected = true; // select mode
+                key1act = 1; // set action state to select
             }
         }
     }
@@ -306,33 +287,10 @@ int main(void)
     DEV_KEY_Config(KEY0);
     // gpio_set_irq_enabled_with_callback(KEY0, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
     DEV_KEY_Config(KEY1);
-    // gpio_set_irq_enabled(KEY1, GPIO_IRQ_EDGE_FALL, true); 
-    // gpio_set_irq_enabled_with_callback(KEY1, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
-
     stdio_init_all();
     // while(!stdio_usb_connected()) {
     //     sleep_ms(100); // wait for USB to be connected
     // }
-
-
-    FRESULT fr;
-    FATFS fs;
-    FIL fil;
-    DWORD nclst;
-    int ret;
-    char buf[100];
-
-
-    bool sd_card_found = true;
-    char userName[8] = "<user>"; // default user name
-    // bool sdInit = sd_init_driver();
-    // printf("SD card driver initialized: %s\r\n", sdInit ? "true" : "false");
-     printf("Initializing SD card...\n");
-    if (!sd_init_driver()) {
-        printf("ERROR: Could not initialize SD card");
-        sd_card_found = false;
-    }
-    // printf("SD card initialized successfully.\n");
 
 
     DEV_Delay_ms(100);
@@ -351,40 +309,10 @@ int main(void)
     Paint_NewImage(BlackImage, OLED_1in3_C_WIDTH, OLED_1in3_C_HEIGHT, 0, WHITE);	
     
     Paint_SelectImage(BlackImage);
-    DEV_Delay_ms(500);
+    DEV_Delay_ms(5000);
     Paint_Clear(BLACK);
 
     OLED_1in3_C_Display(BlackImage);
-    
-    printf("SD card initialized successfully.\r\n");
-    if(sd_card_found){
-    fr = f_mount(&fs, "0:", 1);
-        if (fr != FR_OK) {
-            printf("ERROR: Could not mount filesystem (%d)\r\n", fr);
-            sd_card_found = false;
-        }
-        if(sd_card_found){
-            fr = f_open(&fil, "config.txt", FA_READ);
-            if (fr != FR_OK) {
-                sd_card_found = false;
-            }
-            else{
-                while (f_gets(buf, sizeof(buf), &fil)) {
-                    if (strncmp(buf, "username=", 9) == 0){
-                        char *name = buf + 9; // skip "username="
-                        name[strcspn(name, "\r\n")] = '\0'; // remove newline characters
-                        if (strlen(name) > 0 && strlen(name) < 8) {
-                            strncpy(userName, name, sizeof(userName) - 1);
-                            userName[sizeof(userName) - 1] = '\0'; // ensure null termination
-                        } else {
-                            printf("ERROR: Invalid username in config.txt\r\n");
-                        }
-                        break;
-                    }
-                }       
-            }
-    }
-    }
 
     absolute_time_t start = get_absolute_time();
     int mode = 0;
@@ -399,7 +327,7 @@ int main(void)
         }
         else {
             Paint_DrawString_EN(0, 0, "Welcome:", &Font16, WHITE, BLACK);
-            Paint_DrawString_EN(10, 30, userName, &Font12, WHITE, BLACK);
+            Paint_DrawString_EN(10, 30, "<user>", &Font12, WHITE, BLACK);
         } 
         pollButtons();
 
@@ -412,11 +340,12 @@ int main(void)
         }
     }
     printf("Entering menu screen...\n");
-    int numOfScreens = 3; // number of screens in the menu
+    int numOfScreens = 4; // number of screens in the menu
     char** screens = (char**)malloc(numOfScreens * sizeof(char*)); // allocate memory for the screens
     screens[0] = "QUICK       QUERY"; // spacing to use new line
     screens[1] = "SETTINGS";
     screens[2] = "ADD CAR";
+    screens[3] = "QUIT";
     while (1) {
         int choice = menuScreen(BlackImage, numOfScreens, screens); // enter the menu screen loop
         switch (choice){
@@ -437,12 +366,24 @@ int main(void)
                 screens[numOfScreens - 1] = "ERR";
             }
             else {
+                // TODO: add a new directory for the car
                 screens = temp;
                 screens[numOfScreens] = strdup(carName);
                 numOfScreens++;
-            }
             free(carName);
             break;
+        }
+        case 3: // quit
+            printf("Exiting...\n");
+            for (int i = 0; i < numOfScreens; i++) {
+                free(screens[i]); // free the screen names
+            }
+            free(screens); // free the screens memory
+            OLED_1in3_C_Clear();
+            OLED_1in3_C_Display(BlackImage);
+            DEV_Module_Exit();
+            free(BlackImage);
+            return 0; // exit the program
         default:
             printf("Entering car screen...\n");
             // based on the choice, can determine which car to show
@@ -454,7 +395,4 @@ int main(void)
             free(screens[i]);
         }
     }
-    free(screens); // free the screens memory
-    free(BlackImage); // free the black image memory
-    return 0;
 }
