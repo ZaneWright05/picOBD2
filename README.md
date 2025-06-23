@@ -1,6 +1,5 @@
 # picOBD2
-A project for COMP2215 making use of the provided hardware kit and some additional hardware.
-The project in action can be seen [here](https://youtube.com/shorts/yGXlc7FlCXg?feature=share) (this is the code in /picoOBD2)
+A project for COMP2215 making use of the provided hardware kit and some additional hardware. It is currently being worked on, this readme is up to date for this [commit](https://github.com/ZaneWright05/picOBD2/tree/ef8ef5bad5488312a670652ad57ed4b285b93b33). The project in action can be seen [here](https://youtube.com/shorts/yGXlc7FlCXg?feature=share) (this is the code in /picoOBD2)
 ## General Overview
 This project allows you to use Pi Pico(s) to communicate with car's ecu to retrieve real time data like RPM or throttle position. 
 There are three versions of this project in this repo:
