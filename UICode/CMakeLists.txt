@@ -24,7 +24,7 @@ add_subdirectory(lib/Config)
 add_subdirectory(lib/OLED)
 add_subdirectory(lib/Fonts)
 add_subdirectory(lib/GUI)
-add_subdirectory(lib/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
+add_subdirectory(lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src)
 # add_subdirectory(examples)
 
 
@@ -33,6 +33,7 @@ add_subdirectory(lib/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
 include_directories(./lib/Config)
 include_directories(./lib/GUI)
 include_directories(./lib/OLED)
+# include_directories(./lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src)
 
 
 # generate executable file
@@ -55,4 +56,4 @@ target_link_libraries(UICode
             Config
             pico_stdlib
             hardware_spi
-            FatFs_SPI)
+            no-OS-FatFS-SD-SDIO-SPI-RPi-Pico)

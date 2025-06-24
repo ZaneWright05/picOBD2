@@ -23,10 +23,17 @@ try:
             subprocess.run(format_cmd, shell=True)
             config_path = os.path.join(chosenDrive, "config.txt")
             with open(config_path, "wb") as f:
-                name = input("Enter your username (default user, max 8 chars):") or "user"
+                name = input("Enter your username (default user, max 8 chars):") or "<user>"
                 if len(name) > 8:
                     name = name[:8]
                 f.write(f"username={name}\n".encode())
+                maxCars = input("Enter the maximum number of cars (default 4, max 16):") or "4"
+                if not maxCars.isdigit() or int(maxCars) < 1 or int(maxCars) > 16:
+                    maxCars = "4"
+                f.write(f"maxCars={maxCars}\n".encode())
+                f.write(f"currentCars=0\n".encode())
+                for i in range(int(maxCars)):
+                    f.write(f"car{i+1}=\n".encode())
             print("SD card formatted and config.txt written.")
         else:
             print("Operation cancelled.")

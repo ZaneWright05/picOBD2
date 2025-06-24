@@ -1,3 +1,4 @@
+
 /* hw_config.c
 Copyright 2021 Carl John Kugler III
 
@@ -11,90 +12,58 @@ under the License is distributed on an AS IS BASIS, WITHOUT WARRANTIES OR
 CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
 */
-/*
 
+/*
 This file should be tailored to match the hardware design.
 
-There should be one element of the spi[] array for each hardware SPI used.
-
-There should be one element of the sd_cards[] array for each SD card slot.
-The name is should correspond to the FatFs "logical drive" identifier.
-(See http://elm-chan.org/fsw/ff/doc/filename.html#vol)
-In general, this should correspond to the (zero origin) array index.
-The rest of the constants will depend on the type of
-socket, which SPI it is driven by, and how it is wired.
-
+See
+https://github.com/carlk3/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/tree/main#customizing-for-the-hardware-configuration
 */
 
-#include <assert.h>
-#include <string.h>
-//
-#include "my_debug.h"
-//
 #include "hw_config.h"
-//
-#include "ff.h" /* Obtains integer types */
-//
-#include "diskio.h" /* Declarations of disk functions */
 
-/* 
-This example assumes the following hardware configuration:
+/* Configuration of hardware SPI object */
+static spi_t spi = {
+    .hw_inst = spi0,  // SPI component
+    .sck_gpio = 2,    // GPIO number (not Pico pin number)
+    .mosi_gpio = 3,
+    .miso_gpio = 4,
+    //.baud_rate = 125 * 1000 * 1000 / 8  // 15625000 Hz
+    //.baud_rate = 125 * 1000 * 1000 / 6  // 20833333 Hz
+    .baud_rate = 125 * 1000 * 1000 / 4  // 31250000 Hz
+    //.baud_rate = 125 * 1000 * 1000 / 2  // 62500000 Hz
+};
 
-|       | SPI0  | GPIO  | Pin   | SPI       | MicroSD   | Description            | 
-| ----- | ----  | ----- | ---   | --------  | --------- | ---------------------- |
-| MISO  | RX    | 16    | 21    | DO        | DO        | Master In, Slave Out   |
-| MOSI  | TX    | 19    | 25    | DI        | DI        | Master Out, Slave In   |
-| SCK   | SCK   | 18    | 24    | SCLK      | CLK       | SPI clock              |
-| CS0   | CSn   | 17    | 22    | SS or CS  | CS        | Slave (or Chip) Select |
-| DET   |       | 22    | 29    |           | CD        | Card Detect            |
-| GND   |       |       | 18,23 |           | GND       | Ground                 |
-| 3v3   |       |       | 36    |           | 3v3       | 3.3 volt power         |
+/* SPI Interface */
+static sd_spi_if_t spi_if = {
+    .spi = &spi,  // Pointer to the SPI driving this card
+    .ss_gpio = 7  // The SPI slave select GPIO for this SD card
+};
 
-*/
-
-// Hardware Configuration of SPI "objects"
-// Note: multiple SD cards can be driven by one SPI if they use different slave
-// selects.
-static spi_t spis[] = {  // One for each SPI.
-    {
-        .hw_inst = spi0,  // SPI component
-        .miso_gpio = 16,  // GPIO number (not Pico pin number)
-        .mosi_gpio = 19,
-        .sck_gpio = 18,
-
-        // .baud_rate = 1000 * 1000
-        .baud_rate = 12500 * 1000
-        // .baud_rate = 25 * 1000 * 1000 // Actual frequency: 20833333.
-    }};
-
-// Hardware Configuration of the SD Card "objects"
-static sd_card_t sd_cards[] = {  // One for each SD card
-    {
-        .pcName = "0:",   // Name used to mount device
-        .spi = &spis[0],  // Pointer to the SPI driving this card
-        .ss_gpio = 20,    // The SPI slave select GPIO for this SD card
-        .use_card_detect = false,
-        .card_detect_gpio = 22,  // Card detect
-        .card_detected_true = 1  // What the GPIO read returns when a card is
-                                 // present.
-    }};
+/* Configuration of the SD Card socket object */
+static sd_card_t sd_card = {
+    .type = SD_IF_SPI,
+    .spi_if_p = &spi_if  // Pointer to the SPI interface driving this card
+};
 
 /* ********************************************************************** */
-size_t sd_get_num() { return count_of(sd_cards); }
+
+size_t sd_get_num() { return 1; }
+
+/**
+ * @brief Get a pointer to an SD card object by its number.
+ *
+ * @param[in] num The number of the SD card to get.
+ *
+ * @return A pointer to the SD card object, or @c NULL if the number is invalid.
+ */
 sd_card_t *sd_get_by_num(size_t num) {
-    assert(num <= sd_get_num());
-    if (num <= sd_get_num()) {
-        return &sd_cards[num];
+    if (0 == num) {
+        // The number 0 is a valid SD card number.
+        // Return a pointer to the sd_card object.
+        return &sd_card;
     } else {
-        return NULL;
-    }
-}
-size_t spi_get_num() { return count_of(spis); }
-spi_t *spi_get_by_num(size_t num) {
-    assert(num <= spi_get_num());
-    if (num <= spi_get_num()) {
-        return &spis[num];
-    } else {
+        // The number is invalid. Return @c NULL.
         return NULL;
     }
 }
