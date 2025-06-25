@@ -5,9 +5,7 @@
 #include "GUI_Paint.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
-#include "hw_config.h"
-#include "f_util.h"
-#include "ff.h"
+#include "config_writer.h"
 
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
@@ -29,7 +27,8 @@ bool key1Pressed = false;
 absolute_time_t lastKey0Time;
 absolute_time_t lastKey1Time;
 
-const uint64_t debounceDelayUs = 200000; // 200ms
+const uint64_t debounceDelayUs = 300000; // 300ms
+int maxCars = 0;
 
 void handleKey0Press() {
     absolute_time_t now = get_absolute_time();
@@ -76,27 +75,6 @@ int menu_Screen(UBYTE *image, int numScreens, char** screens) {
         Paint_SelectImage(image);
         Paint_Clear(BLACK);
         Paint_DrawString_EN(0, 0, "Main Menu", &Font16, WHITE, BLACK);
-        Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
-        OLED_1in3_C_Display(image);
-        pollButtons();
-        if (key0Pressed) {
-            key0Pressed = false;
-            selected = (selected + 1) % numScreens;
-        }
-        if  (key1Pressed) {
-            key1Pressed = false;
-            break;
-        }
-    }
-    return selected;
-}
-
-int car_Screen(UBYTE *image, int numScreens, char screens[][9]) {
-    int selected = 0;
-    while (1){
-        Paint_SelectImage(image);
-        Paint_Clear(BLACK);
-        Paint_DrawString_EN(0, 0, "Choose car:", &Font16, WHITE, BLACK);
         Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
         OLED_1in3_C_Display(image);
         pollButtons();
@@ -297,118 +275,88 @@ char* name_Car(UBYTE *BlackImage){
     return name;
 }
 
-bool write_to_config(const char * msg){
-    FATFS fs;
-    FRESULT fr = f_mount(&fs, "", 1);
-    if (FR_OK != fr) {
-        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+int populate_car_array(char carArray[][9] , int currentCars, int maxCars){
+    for (int i = 0; i < maxCars + 1; i++) {
+        strcpy(carArray[i], "");
     }
 
-    FIL fil;
-    const char* filename = "config.txt";
-    fr = f_open(&fil, filename, FA_OPEN_APPEND | FA_WRITE);
-    if (FR_OK != fr && FR_EXIST != fr) {
-        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
+    int strLen = 10*currentCars; // 8 chars, delimiter, null terminator
+    char *carStr = malloc(strLen);
+    if(carStr == NULL){
+        printf("Failed to allocate memory for car string\n");
+        return 0;
     }
-    if (f_printf(&fil, msg) < 0) {
-        printf("f_printf failed\n");
+    find_in_config("cars=", carStr, strLen);
+    if (strlen(carStr) == 0) {
+        free(carStr);
+        return 0;
     }
-
-    fr = f_close(&fil);
-    if (FR_OK != fr) {
-        printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
+    char *token = strtok(carStr, ",");
+    int index = 0;
+    while (token != NULL) {
+        strcpy(carArray[index], token);
+        index++;
+        token = strtok(NULL, ",");
     }
-
-    f_unmount("");
+    strcpy(carArray[currentCars], "BACK"); // add BACK option 
+    free(carStr);
+    return index;
 }
 
-bool find_in_config(const char* key, char* value, size_t value_size) {
-    FATFS fs;
-    FRESULT fr = f_mount(&fs, "", 1);
-    if (FR_OK != fr) {
-        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
-    }
+int car_Screen(UBYTE *image, int numScreens, char screens[][9]) {
+    int selected = 0;
+    while (1){
+        Paint_SelectImage(image);
+        Paint_Clear(BLACK);
+        Paint_DrawString_EN(0, 0, "Choose car:", &Font16, WHITE, BLACK);
+        Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
+        OLED_1in3_C_Display(image);
+        pollButtons();
+        if (key0Pressed) {
+            key0Pressed = false;
+            selected = (selected + 1) % numScreens;
+        }
+        if (key1Pressed) {
+            key1Pressed = false;
+           if(strcmp(screens[selected], "BACK") == 0) {
+                printf("Exiting car selection\r\n");
+                return -1; // return -1 to indicate exit
+            } else{
+                char carKey[32];
+                snprintf(carKey, sizeof(carKey), "car%d=%s", selected + 1, screens[selected]);
+                printf(carKey);
+                char temp[(numScreens)* 10];// 9 char + delim
+                temp[0] = '\0'; // initialize the string
+                int carCount = numScreens - 1; // exclude BACK option
+                for(int i = 0; i < carCount; i++) {
+                    if (i == selected) {
+                        continue; // skip the selected car
+                    }
+                    strcat(temp, screens[i]);
+                    if (i < carCount - 1) {
+                        strcat(temp, ","); // add delimiter
+                    }
+                }
 
-    FIL fil;
-    const char* const filename = "config.txt";
-    fr = f_open(&fil, filename, FA_READ);
-    if (FR_OK != fr) {
-        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
-    }
-
-    char buf[128];
-    while (f_gets(buf, sizeof(buf), &fil)) { // get each line, written into buf
-        if (strncmp(buf, key, strlen(key)) == 0) { // look for the key
-            strncpy(value, buf + strlen(key), value_size - 1);  // copy the value part
-            value[value_size - 1] = '\0'; // ensure null termination
-            f_close(&fil);
-            size_t len = strlen(value);
-            while (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r')) { // remove trailing newlines
-                value[--len] = '\0';
+                printf("Updating config with: %s\n", temp);
+                if(!update_config("cars=", temp)){
+                    printf("Failed to update config file with new cars.\n");
+                    return -1; // exit if failed
+                }
+                char newCurrentCars[16];
+                snprintf(newCurrentCars, sizeof(newCurrentCars), "%d", carCount - 1);
+                if(!update_config("currentCars=", newCurrentCars)){
+                    printf("Failed to update current cars in config file.\n");
+                    return -1; // exit if failed
+                }
+                // todo:
+                // update the car array
+                // update the currentCars variable
+                // poss create a function to get the config data, so i dont have to rewrite the code in init
             }
-            return true;
         }
     }
-
-    f_close(&fil);
-    return false;
-}
-
-bool update_config(const char* key, const char* new_value) {
-    FATFS fs;
-    FRESULT fr = f_mount(&fs, "", 1);
-    if (FR_OK != fr) {
-        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
-    }
-
-    FIL fil;
-    const char* filename = "config.txt";
-    fr = f_open(&fil, filename, FA_READ);
-    if (FR_OK != fr) {
-        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
-    }
-
-    char lines[32][128]; // store up to 32 lines
-    // formatter allows up to 16 cars so 32 lines should be enough
-    int line_count = 0;
-    char buf[128];
-    bool found = false;
-
-    // we look through the file looking for the key
-    // if we find it, we replace the line with the new value
-        // this is done by ignoring the value of the key
-    // otherwise we just copy the line as is
-    while (f_gets(buf, sizeof(buf), &fil) && line_count < 32) {
-        if (strncmp(buf, key, strlen(key)) == 0) {
-            snprintf(lines[line_count], sizeof(lines[line_count]), "%s%s\n", key, new_value);
-            found = true;
-            printf("Updated line: %s", lines[line_count]);
-        }
-        else{
-            strncpy(lines[line_count], buf, sizeof(lines[line_count]));
-            lines[line_count][sizeof(lines[line_count]) - 1] = '\0';
-        }
-        line_count++;
-    }
-
-    f_close(&fil);
-
-    // now we write the lines back to the file
-    fr = f_open(&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
-    if (FR_OK != fr) {
-        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
-    }
-
-    for (int i = 0; i < line_count; i++) {
-        f_puts(lines[i], &fil);
-    }
-
-    f_close(&fil);
-    f_unmount("");
-
-    // return true if we found the key and updated it
-    // return false if we didn't find the key
-    return found;
+    return selected;
 }
 
 int main(void)
@@ -429,12 +377,10 @@ int main(void)
         sleep_ms(100); // wait for USB to be connected
     }
 
-
     DEV_Delay_ms(100);
     OLED_1in3_C_Init();
     OLED_1in3_C_Clear();
 
-    
     // // // UI setup from waveshare: https://www.waveshare.com/wiki/Pico-OLED-1.3#Overview
     UBYTE *BlackImage;
     UWORD Imagesize = ((OLED_1in3_C_WIDTH%8==0)? (OLED_1in3_C_WIDTH/8): (OLED_1in3_C_WIDTH/8+1)) * OLED_1in3_C_HEIGHT;
@@ -457,7 +403,6 @@ int main(void)
         strcpy(userName, "<user>"); // default username if not found
     }
     
-    int maxCars = 0;
     char temp[16];
     if(find_in_config("maxCars=", temp, sizeof(temp))){
         maxCars = atoi(temp);
@@ -473,20 +418,17 @@ int main(void)
         currentCars = 0;
     }
     printf("Current cars: %d\n", currentCars);
-
-    char carArray [maxCars][9]; // allocate memory for the car array
-    for(int i = 1; i<=currentCars; i++){
-        char key[16];
-        snprintf(key, sizeof(key), "car%d=", i);
-        if(!find_in_config(key, carArray[i-1], sizeof(carArray[i-1]))){
-            strcpy(carArray[i-1], "<car>");
-        }
-    }
-    strcpy(carArray[currentCars],"BACK");
     // when new cars are added need to move back + 1 // back option for the menu
 
-    for(int i = 0; i < currentCars; i++) {
-        printf("Car %d: %s\n", i, carArray[i]);
+    char carArray[maxCars][9]; // 0 to maxCars (includes BACK), 9 char (name + null)
+    int foundCars = populate_car_array(carArray, currentCars ,maxCars);
+    if(!foundCars){
+        printf("Failed to populate car array\n");
+        return -1; // exit if failed
+    }
+    if(currentCars != foundCars) {
+        printf("Current car, does not match found cars, recommend resetting config file.\n");
+        return -1;
     }
 
     while(mode < 2) {
@@ -547,16 +489,15 @@ int main(void)
             // generate msg : carX=carName
             write_to_config(msg); // write the car name to the config
             printf("Car added: %s\n", carName);
-
-            strcpy(carArray[currentCars], carName);
-            strcpy(carArray[currentCars + 1],"BACK");
-
             free(carName);
             break;
         case 3: // view entered cars
             printf("Entering view cars screen...\n");
-            int selectedCar = car_Screen(BlackImage, currentCars + 2, carArray);
-            continue;
+            // for(int i = 0; i <= currentCars; i++) {
+            //     printf("Car %d: %s\n", i + 1, carArray[i]);
+            // }
+            int selectedCar = car_Screen(BlackImage, currentCars + 1, carArray); // number of cars + 1 for BACK option
+            break;
         case 4: // quit
             printf("Exiting...\n");
             for (int i = 0; i < numOfScreens; i++) {
