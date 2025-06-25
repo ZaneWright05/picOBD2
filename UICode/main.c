@@ -70,12 +70,33 @@ void gpio_callback(uint gpio, uint32_t events) {
     }
 }
 
-int menuScreen(UBYTE *image, int numScreens, char** screens) {
+int menu_Screen(UBYTE *image, int numScreens, char** screens) {
     int selected = 0;
     while (1){
         Paint_SelectImage(image);
         Paint_Clear(BLACK);
         Paint_DrawString_EN(0, 0, "Main Menu", &Font16, WHITE, BLACK);
+        Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
+        OLED_1in3_C_Display(image);
+        pollButtons();
+        if (key0Pressed) {
+            key0Pressed = false;
+            selected = (selected + 1) % numScreens;
+        }
+        if  (key1Pressed) {
+            key1Pressed = false;
+            break;
+        }
+    }
+    return selected;
+}
+
+int car_Screen(UBYTE *image, int numScreens, char screens[][9]) {
+    int selected = 0;
+    while (1){
+        Paint_SelectImage(image);
+        Paint_Clear(BLACK);
+        Paint_DrawString_EN(0, 0, "Choose car:", &Font16, WHITE, BLACK);
         Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
         OLED_1in3_C_Display(image);
         pollButtons();
@@ -453,6 +474,21 @@ int main(void)
     }
     printf("Current cars: %d\n", currentCars);
 
+    char carArray [maxCars][9]; // allocate memory for the car array
+    for(int i = 1; i<=currentCars; i++){
+        char key[16];
+        snprintf(key, sizeof(key), "car%d=", i);
+        if(!find_in_config(key, carArray[i-1], sizeof(carArray[i-1]))){
+            strcpy(carArray[i-1], "<car>");
+        }
+    }
+    strcpy(carArray[currentCars],"BACK");
+    // when new cars are added need to move back + 1 // back option for the menu
+
+    for(int i = 0; i < currentCars; i++) {
+        printf("Car %d: %s\n", i, carArray[i]);
+    }
+
     while(mode < 2) {
         absolute_time_t now = get_absolute_time();
         uint64_t elapsed_time = absolute_time_diff_us(start, now);
@@ -484,7 +520,7 @@ int main(void)
     screens[3] = "VIEW CARS";
     screens[4] = "QUIT";
     while (1) {
-        int choice = menuScreen(BlackImage, numOfScreens, screens); // enter the menu screen loop
+        int choice = menu_Screen(BlackImage, numOfScreens, screens); // enter the menu screen loop
         switch (choice){
         case 0: // rt data
             printf("Entering real-time data screen...\n");
@@ -511,11 +547,16 @@ int main(void)
             // generate msg : carX=carName
             write_to_config(msg); // write the car name to the config
             printf("Car added: %s\n", carName);
-            
+
+            strcpy(carArray[currentCars], carName);
+            strcpy(carArray[currentCars + 1],"BACK");
+
             free(carName);
             break;
-        case 3:
-            
+        case 3: // view entered cars
+            printf("Entering view cars screen...\n");
+            int selectedCar = car_Screen(BlackImage, currentCars + 2, carArray);
+            continue;
         case 4: // quit
             printf("Exiting...\n");
             for (int i = 0; i < numOfScreens; i++) {
