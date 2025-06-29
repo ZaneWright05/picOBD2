@@ -28,23 +28,6 @@ int currentCars = 0;
 //     }
 // }
 
-bool add_Car_to_config(const char *carName){
-    if (carName == NULL  || strlen(carName) == 0) {
-        printf("Invalid car name\n");
-        return false;
-    }
-    char msg[128];
-    find_in_config("cars=", msg, sizeof(msg)); // get the current cars from the config
-    strcat(msg, ","); // add a comma to the end
-    strcat(msg, carName); // add the new car name
-    printf("Adding car to config: %s\n", msg);
-    if(!update_config("cars=", msg)){
-        printf("Failed to update config file with new car.\n");
-        return false; // exit if failed
-    }
-    return true;
-}
-
 int populate_car_array(char carArray[][9] , int currentCars, int maxCars){
     for (int i = 0; i < maxCars + 1; i++) {
         strcpy(carArray[i], "");
@@ -119,6 +102,30 @@ int get_current_cars(){
         currentCars = 0;
     }
     return currentCars;
+}
+
+bool add_Car_to_config(const char *carName){
+    if (carName == NULL  || strlen(carName) == 0) {
+        printf("Invalid car name\n");
+        return false;
+    }
+    char msg[128] = {0};
+    find_in_config("cars=", msg, sizeof(msg)); // get the current cars from the config
+    int currentCars = get_current_cars();
+    if (!currentCars){
+        strcpy(msg, ""); // if no cars, start with empty string
+        strcat(msg, carName); // add the new car name
+    }
+    else{
+        strcat(msg, ","); // add a comma to the end
+        strcat(msg, carName); // add the new car name
+    }
+    printf("Adding car to config: %s\n", msg);
+    if(!update_config("cars=", msg)){
+        printf("Failed to update config file with new car.\n");
+        return false; // exit if failed
+    }
+    return true;
 }
 
 int main(void)
@@ -230,40 +237,35 @@ int main(void)
         case 3: // view entered cars
             printf("Entering view cars screen...\n");
             currentCars = get_current_cars();
+            if(currentCars <= 0) {
+                printf("No cars entered yet.\n");
+                continue; // skip to the next iteration
+            }
             populate_car_array(carArray, currentCars, maxCars);
             int selectedCar = car_Screen(BlackImage, currentCars + 1, carArray); // number of cars + 1 for BACK option
             // temporary reduction of current cars, curr any breakout will be a deleted car
-            if(selectedCar){
+            if(selectedCar != -1){ // not BACK
+                print_config();
                 printf("Selected car: %s\n", carArray[selectedCar]);
                 decrement_current_cars();
-                // code to remove the car from the config file
-                //  char carKey[32];
-                // snprintf(carKey, sizeof(carKey), "car%d=%s", selected + 1, screens[selected]);
-                // printf(carKey);
-                // char temp[(numScreens)* 10];// 9 char + delim
-                // temp[0] = '\0'; // initialize the string
-                // int carCount = numScreens - 1; // exclude BACK option
-                // for(int i = 0; i < carCount; i++) {
-                //     if (i == selected) {
-                //         continue; // skip the selected car
-                //     }
-                //     strcat(temp, screens[i]);
-                //     if (i < carCount - 1) {
-                //         strcat(temp, ","); // add delimiter
-                //     }
-                // }
-
-                // printf("Updating config with: %s\n", temp);
-                // if(!update_config("cars=", temp)){
-                //     printf("Failed to update config file with new cars.\n");
-                //     return -1; // exit if failed
-                // }
-                // char newCurrentCars[16];
-                // snprintf(newCurrentCars, sizeof(newCurrentCars), "%d", carCount - 1);
-                // if(!update_config("currentCars=", newCurrentCars)){
-                //     printf("Failed to update current cars in config file.\n");
-                //     return -1; // exit if failed
-                // }
+                currentCars = get_current_cars();
+                char temp[maxCars * 10];
+                bool first = true;
+                for(int i =0; i <= currentCars; i++){
+                    if(i == selectedCar) continue; // skip the selected car
+                    if(!first){
+                        strcat(temp, ",");
+                    }
+                    strcat(temp, carArray[i]);
+                    first = false;
+                    printf("i = %d, temp = %s\n", i, temp);
+                }
+                printf("Updating config with cars: %s\n", temp);
+                if(!update_config("cars=", temp)){
+                    printf("Failed to update config file with cars.\n");
+                    continue; // skip to the next iteration
+                }
+                print_config();
                 // // todo:
                 // // update the car array
                 // // update the currentCars variable

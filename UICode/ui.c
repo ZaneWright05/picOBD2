@@ -312,7 +312,7 @@ int car_Screen(UBYTE *image, int numScreens, char screens[][9]) {
             key1Pressed = false;
            if(strcmp(screens[selected], "BACK") == 0) {
                 printf("Exiting car selection\r\n");
-                return 0;
+                return -1;
             }
             break;
         }
