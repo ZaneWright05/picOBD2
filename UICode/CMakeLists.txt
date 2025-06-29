@@ -41,6 +41,7 @@ add_executable(UICode
 main.c
 hw_config.c
 config_writer.c
+ui.c
 )
 
 # enable usb output, disable uart output

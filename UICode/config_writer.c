@@ -164,3 +164,26 @@ bool delete_from_config(const char* key) {
 
     return found; // return true if we found and deleted the key
 }
+
+void print_config(){
+    FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+    }
+
+    FIL fil;
+    const char* filename = "config.txt";
+    fr = f_open(&fil, filename, FA_READ);
+    if (FR_OK != fr) {
+        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
+    }
+    char buf[128];
+    printf("Config file contents:\n");
+    while (f_gets(buf, sizeof(buf), &fil)) { // get each line, written into buf
+        printf("%s", buf); // print the line
+    }
+    f_close(&fil);
+    f_unmount("");
+    printf("End of config file contents.\n");
+}

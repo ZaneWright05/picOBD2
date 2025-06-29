@@ -6,273 +6,43 @@
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
 #include "config_writer.h"
+#include "ui.h"
 
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
 
 UWORD imageBuffer[OLED_1in3_C_WIDTH * OLED_1in3_C_HEIGHT / 8];
 
-struct Mode{
-    char* name; // name to display
-    uint8_t id; // id to send
-    char* unit; // unit to display
-};
+// for the config file, updating 
+// config file updated -> this will be used as a fixed truth 
+// i.e when ever a car is added or removed we take from config so that the code state and the cofig always match)
 
-// volatile
-bool key0Pressed = false;
-// volatile 
-bool key1Pressed = false;
-
-// these are used to debounce the keys
-absolute_time_t lastKey0Time;
-absolute_time_t lastKey1Time;
-
-const uint64_t debounceDelayUs = 300000; // 300ms
 int maxCars = 0;
+int currentCars = 0;
 
-void handleKey0Press() {
-    absolute_time_t now = get_absolute_time();
-    if (absolute_time_diff_us(lastKey0Time, now) < debounceDelayUs) {
-        return;
-    }
-    lastKey0Time = now;
-    key0Pressed = true;
-}
+// void gpio_callback(uint gpio, uint32_t events) {
+//     if (gpio == KEY0) {
+//         handleKey0Press();
+//     } else if (gpio == KEY1) {
+//         handleKey1Press();
+//     }
+// }
 
-void handleKey1Press() {
-    absolute_time_t now = get_absolute_time();
-    if (absolute_time_diff_us(lastKey1Time, now) < debounceDelayUs) {
-        return;
+bool add_Car_to_config(const char *carName){
+    if (carName == NULL  || strlen(carName) == 0) {
+        printf("Invalid car name\n");
+        return false;
     }
-    lastKey1Time = now;
-    key1Pressed = true;
-}
-
-void pollButtons(){
-    if(DEV_Digital_Read(KEY0) == 0) {
-        handleKey0Press();
-    } else {
-        key0Pressed = false; 
+    char msg[128];
+    find_in_config("cars=", msg, sizeof(msg)); // get the current cars from the config
+    strcat(msg, ","); // add a comma to the end
+    strcat(msg, carName); // add the new car name
+    printf("Adding car to config: %s\n", msg);
+    if(!update_config("cars=", msg)){
+        printf("Failed to update config file with new car.\n");
+        return false; // exit if failed
     }
-    if(DEV_Digital_Read(KEY1) == 0) {
-        handleKey1Press();
-    } else {
-        key1Pressed = false;
-    }
-}
-
-void gpio_callback(uint gpio, uint32_t events) {
-    if (gpio == KEY0) {
-        handleKey0Press();
-    } else if (gpio == KEY1) {
-        handleKey1Press();
-    }
-}
-
-int menu_Screen(UBYTE *image, int numScreens, char** screens) {
-    int selected = 0;
-    while (1){
-        Paint_SelectImage(image);
-        Paint_Clear(BLACK);
-        Paint_DrawString_EN(0, 0, "Main Menu", &Font16, WHITE, BLACK);
-        Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
-        OLED_1in3_C_Display(image);
-        pollButtons();
-        if (key0Pressed) {
-            key0Pressed = false;
-            selected = (selected + 1) % numScreens;
-        }
-        if  (key1Pressed) {
-            key1Pressed = false;
-            break;
-        }
-    }
-    return selected;
-}
-
-void realTimeDataScreen(UBYTE *BlackImage) {
-    
-    // mode array to hold the different modes
-    struct Mode mode[7] = {
-        {"Eng Speed", 0x0C, "rpm"},
-        {"Veh Speed", 0x0D, "km/h"},
-        {"Intake temp", 0x0F, "C"},
-        {"Clnt temp", 0x05, "C"},
-        {"Thrttl Pos", 0x11, "%"},
-        {"Engine load", 0x04, "%"},
-        {"BACK", 0x00, ""}
-    };
-    int current = 0; // current mode index
-    bool visible = true; // toggle visibility of the name and unit
-    bool selected = false; // if the mode is selected
-    int key0act = 0; // key0 action state
-    int key1act = 0; // key1 action state
-    char valStr[10] = "0"; // value string to display
-    uint8_t canID = 0x00; // CAN ID to send, 0x00 means no request
-    absolute_time_t start = get_absolute_time(); // timer for toggling the screen
-    while(1){
-      Paint_SelectImage(BlackImage);
-        Paint_Clear(BLACK);
-
-        if (visible && selected == false) { // show name and unit and instructions
-            Paint_DrawString_EN(0, 0, mode[current].name, &Font16, WHITE, BLACK);
-            Paint_DrawString_EN(OLED_1in3_C_WIDTH - (strlen(mode[current].unit) * Font16.Width), 17, mode[current].unit, &Font16, WHITE, BLACK);
-            Paint_DrawLine(0, 35, OLED_1in3_C_WIDTH, 35, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-            Paint_DrawString_EN(0, 37, "0 for mode" , &Font12, WHITE, BLACK);
-            Paint_DrawString_EN(0, 49, "1 to select", &Font12, WHITE, BLACK); 
-        } else{
-            if(selected){ // toggle disabled
-                Paint_DrawString_EN(0, 0, mode[current].name, &Font16, WHITE, BLACK); // show name
-                    printf("No data received: %s\r\n", valStr);
-                    Paint_DrawString_EN(0, 17, valStr, &Font16, WHITE, BLACK); // show old value to make it look consistent
-                }
-                // show unit
-                Paint_DrawString_EN(OLED_1in3_C_WIDTH - (strlen(mode[current].unit) * Font16.Width), 17, mode[current].unit, &Font16, WHITE, BLACK);
-            }
-            // show line and instructions
-            Paint_DrawLine(0, 35, OLED_1in3_C_WIDTH, 35, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-            Paint_DrawString_EN(0, 37, "0 for mode" , &Font12, WHITE, BLACK);
-            Paint_DrawString_EN(0, 49, "1 to select", &Font12, WHITE, BLACK);
-
-        OLED_1in3_C_Display(BlackImage);
-
-        // timer for toggling the screen
-        absolute_time_t now = get_absolute_time();
-        if(absolute_time_diff_us(start, now) >= 500000){
-            start = now;
-            if (visible) {
-                visible = false;
-            } else {
-                visible = true;
-            }
-        }
-        pollButtons();
-        // button presses
-        if(key0Pressed) {
-            key0Pressed = false;
-            if (selected) { // if selected, change mode
-                canID = 0x00; // reset CAN ID
-                selected = false; // unselect
-                key0act = 0; // reset action state
-            } else {
-                current = (current + 1) % 7; // change mode
-                canID = mode[current].id; // set CAN ID
-                key0act = 1; // set action state to change mode
-            }
-        }
-        if(key1Pressed) {
-            key1Pressed = false;
-            if (current == 6) { // if BACK is selected, exit
-                return;
-            }
-            if (selected) { // if selected, send request
-                selected = false; // unselect
-                key1act = 0; // reset action state
-            } else {
-                selected = true; // select mode
-                key1act = 1; // set action state to select
-            }
-        }
-    }
-}
-
-char convertToChar(int value) {
-    if (value == -1) {
-        return ' '; // return space for unselected characters
-    }
-    if (value >= 0 && value <= 25){
-        return 'A' + value; // convert 0-25 to A-Z
-    } else if (value >= 26 && value <= 35) {
-        return '0' + (value - 26); // convert 26-35 to 0-9
-    } else {
-        return '?'; // return '?' for invalid values
-    }
-}
-
-char* name_Car(UBYTE *BlackImage){
-    int lineWidth = (OLED_1in3_C_WIDTH - 20)/ 8; // width of the line
-    absolute_time_t start = get_absolute_time();
-    bool visible = true; // toggle for the selected 
-    int selected = 0; // selected character index
-    int characters[8] = {-1,-1,-1,-1,-1,-1,-1,-1}; // array to hold the characters
-    while (1) {
-        absolute_time_t now = get_absolute_time();
-        uint64_t elapsed_time = absolute_time_diff_us(start, now);
-        if (elapsed_time >= 500000) { // 500ms
-            start = now;
-            visible = !visible; // toggle visibility
-        }
-        Paint_SelectImage(BlackImage);
-        Paint_Clear(BLACK);
-        Paint_DrawString_EN(0, 0, "Enter Name:", &Font16, WHITE, BLACK);
-        int y = 40;
-        for (int i = 0; i < 8; i++) {
-            int x1 = 2 + i * 16;
-            int x2 = x1 + 12;
-            char charStr[2] = {convertToChar(characters[i]), '\0'};
-            Paint_DrawString_EN(x1, y - 15, charStr, &Font16, WHITE, BLACK);
-            if(i == selected && !visible){
-                continue;
-            }
-            Paint_DrawLine(x1, y, x2, y, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-        }  
-        Paint_DrawString_EN(0, y + 5, "0 for next", &Font8, WHITE, BLACK);
-        Paint_DrawString_EN(0, y + 13, "1 to change/select", &Font8, WHITE, BLACK);
-        if(selected == 8){
-            if (visible) {
-                // Paint_DrawRectangle(OLED_1in3_C_WIDTH - 28 , y + 5, OLED_1in3_C_WIDTH - 2, y + 15, WHITE, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
-                Paint_DrawString_EN(OLED_1in3_C_WIDTH - 28 , y + 10, "Done?", &Font8, WHITE, BLACK);
-            }
-        } else {
-            Paint_DrawString_EN(OLED_1in3_C_WIDTH - 28 , y + 10, "Done?", &Font8, WHITE, BLACK);
-        }
-        Paint_DrawRectangle(OLED_1in3_C_WIDTH - 30 , y + 8, OLED_1in3_C_WIDTH - 2, y + 20, WHITE, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
-        
-        pollButtons();
-        if(key0Pressed) {
-            key0Pressed = false;
-            selected = (selected + 1) % 9; // move to the next character
-        }
-        if(key1Pressed) {
-            key1Pressed = false;
-            bool isDone = false;
-            if (selected == 8) { // if the last character is selected, exit
-                for (int i = 0; i < 8; i++) {
-                    if (characters[i] != -1) { // if any character is selected
-                        isDone = true;
-                        break;
-                    }
-                }
-                if (isDone){
-                    break;
-                }
-            }
-            else {
-                int currChar = characters[selected];
-                if(currChar == 35){
-                    currChar = -1; // if the character is 36, set it to -1 (space)
-                } else if(currChar == -1) {
-                    currChar = 0; // if the character is -1, set it to 0 (A)
-                } else {
-                    currChar++;
-                }
-                characters[selected] = currChar; // 0-25 for A-Z, 26-35 for 0-9
-            }
-        }
-        OLED_1in3_C_Display(BlackImage);
-    }
-    char *name = malloc(9);
-    if (!name) return NULL;
-    for (int i = 0; i < 8; i++) {
-        if (characters[i] == -1) {
-            name[i] = ' ';
-        } else {
-            name[i] = convertToChar(characters[i]);
-            // printf("%c", convertToChar(characters[i]));
-        }
-    }
-    name[8] = '\0'; // null-terminate the string
-    return name;
+    return true;
 }
 
 int populate_car_array(char carArray[][9] , int currentCars, int maxCars){
@@ -303,60 +73,52 @@ int populate_car_array(char carArray[][9] , int currentCars, int maxCars){
     return index;
 }
 
-int car_Screen(UBYTE *image, int numScreens, char screens[][9]) {
-    int selected = 0;
-    while (1){
-        Paint_SelectImage(image);
-        Paint_Clear(BLACK);
-        Paint_DrawString_EN(0, 0, "Choose car:", &Font16, WHITE, BLACK);
-        Paint_DrawString_EN(0, 20, screens[selected], &Font16, WHITE, BLACK);
-        OLED_1in3_C_Display(image);
-        pollButtons();
-        if (key0Pressed) {
-            key0Pressed = false;
-            selected = (selected + 1) % numScreens;
-        }
-        if (key1Pressed) {
-            key1Pressed = false;
-           if(strcmp(screens[selected], "BACK") == 0) {
-                printf("Exiting car selection\r\n");
-                return -1; // return -1 to indicate exit
-            } else{
-                char carKey[32];
-                snprintf(carKey, sizeof(carKey), "car%d=%s", selected + 1, screens[selected]);
-                printf(carKey);
-                char temp[(numScreens)* 10];// 9 char + delim
-                temp[0] = '\0'; // initialize the string
-                int carCount = numScreens - 1; // exclude BACK option
-                for(int i = 0; i < carCount; i++) {
-                    if (i == selected) {
-                        continue; // skip the selected car
-                    }
-                    strcat(temp, screens[i]);
-                    if (i < carCount - 1) {
-                        strcat(temp, ","); // add delimiter
-                    }
-                }
-
-                printf("Updating config with: %s\n", temp);
-                if(!update_config("cars=", temp)){
-                    printf("Failed to update config file with new cars.\n");
-                    return -1; // exit if failed
-                }
-                char newCurrentCars[16];
-                snprintf(newCurrentCars, sizeof(newCurrentCars), "%d", carCount - 1);
-                if(!update_config("currentCars=", newCurrentCars)){
-                    printf("Failed to update current cars in config file.\n");
-                    return -1; // exit if failed
-                }
-                // todo:
-                // update the car array
-                // update the currentCars variable
-                // poss create a function to get the config data, so i dont have to rewrite the code in init
-            }
-        }
+bool increment_current_cars(){
+    char temp[16];
+    if(find_in_config("currentCars=", temp, sizeof(temp))){
+        currentCars = atoi(temp);
+    } else{
+        currentCars = 0;
     }
-    return selected;
+    currentCars++;
+    char currentCarsStr[16];
+    snprintf(currentCarsStr, sizeof(currentCarsStr), "%d", currentCars);
+    if(!update_config("currentCars=", currentCarsStr)){
+        printf("Failed to update current cars in config file.\n");
+        return false; // exit if failed
+    }
+    return true;
+}
+
+bool decrement_current_cars(){
+    char temp[16];
+    if(find_in_config("currentCars=", temp, sizeof(temp))){
+        currentCars = atoi(temp);
+    } else{
+        currentCars = 0;
+    }
+    if(currentCars <= 0) {
+        printf("Current cars is already 0, cannot decrement.\n");
+        return false; // exit if failed
+    }
+    currentCars--;
+    char currentCarsStr[16];
+    snprintf(currentCarsStr, sizeof(currentCarsStr), "%d", currentCars);
+    if(!update_config("currentCars=", currentCarsStr)){
+        printf("Failed to update current cars in config file.\n");
+        return false; // exit if failed
+    }
+    return true;
+}
+
+int get_current_cars(){
+    char temp[16];
+    if(find_in_config("currentCars=", temp, sizeof(temp))){
+        currentCars = atoi(temp);
+    } else{
+        currentCars = 0;
+    }
+    return currentCars;
 }
 
 int main(void)
@@ -396,8 +158,6 @@ int main(void)
 
     OLED_1in3_C_Display(BlackImage);
 
-    absolute_time_t start = get_absolute_time();
-    int mode = 0;
     char userName[8] = "<user>"; // default username
     if(!find_in_config("username=", userName, sizeof(userName))){
         strcpy(userName, "<user>"); // default username if not found
@@ -411,12 +171,7 @@ int main(void)
     }
     printf("Max cars: %d\n", maxCars);
 
-    int currentCars = 0;
-    if(find_in_config("currentCars=", temp, sizeof(temp))){
-        currentCars = atoi(temp);
-    } else{
-        currentCars = 0;
-    }
+    currentCars = get_current_cars();
     printf("Current cars: %d\n", currentCars);
     // when new cars are added need to move back + 1 // back option for the menu
 
@@ -431,28 +186,8 @@ int main(void)
         return -1;
     }
 
-    while(mode < 2) {
-        absolute_time_t now = get_absolute_time();
-        uint64_t elapsed_time = absolute_time_diff_us(start, now);
-        Paint_SelectImage(BlackImage);
-        Paint_Clear(BLACK);
-        if(mode == 0){
-            Paint_DrawString_EN(0, 0, "picOBD2", &Font24, WHITE, BLACK);
-        }
-        else {
-            Paint_DrawString_EN(0, 0, "Welcome:", &Font16, WHITE, BLACK);
-            Paint_DrawString_EN(10, 30, userName, &Font12, WHITE, BLACK);
-        } 
-        pollButtons();
-
-        OLED_1in3_C_Display(BlackImage);
-        if (elapsed_time >= 2000000 || key0Pressed || key1Pressed){
-            start = now;
-            mode++;
-            key0Pressed = false;
-            key1Pressed = false;
-        }
-    }
+    
+    load_screen(BlackImage, userName);
     printf("Entering menu screen...\n");
     int numOfScreens = 5; // number of screens in the menu
     char** screens = (char**)malloc(numOfScreens * sizeof(char*)); // allocate memory for the screens
@@ -472,31 +207,68 @@ int main(void)
             printf("Entering settings screen...\n");
             break;
         case 2: // add car
+            // print_config();
             printf("Entering add car screen...\n");
+            currentCars = get_current_cars();
             if(currentCars >= maxCars && maxCars > 0) {
                 printf("Max cars reached, cannot add more.\n");
                 continue; // skip to the next iteration
             }
             char *carName = name_Car(BlackImage); // enter the name car screen
             printf("Car name entered: %s\n", carName);
-            currentCars++;
+            increment_current_cars();
 
-            char currentCarsStr[16];
-            snprintf(currentCarsStr, sizeof(currentCarsStr), "%d", currentCars);
-            update_config("currentCars=", currentCarsStr); // update the current cars in the config
-            char msg[64];
-            snprintf(msg, sizeof(msg), "car%d=%s\n", currentCars, carName);
-            // generate msg : carX=carName
-            write_to_config(msg); // write the car name to the config
+            if(!add_Car_to_config(carName)){
+                printf("Failed to add car to config file.\n");
+                free(carName); // free the car name memory
+                continue; // skip to the next iteration
+            }
             printf("Car added: %s\n", carName);
             free(carName);
+            // print_config();
             break;
         case 3: // view entered cars
             printf("Entering view cars screen...\n");
-            // for(int i = 0; i <= currentCars; i++) {
-            //     printf("Car %d: %s\n", i + 1, carArray[i]);
-            // }
+            currentCars = get_current_cars();
+            populate_car_array(carArray, currentCars, maxCars);
             int selectedCar = car_Screen(BlackImage, currentCars + 1, carArray); // number of cars + 1 for BACK option
+            // temporary reduction of current cars, curr any breakout will be a deleted car
+            if(selectedCar){
+                printf("Selected car: %s\n", carArray[selectedCar]);
+                decrement_current_cars();
+                // code to remove the car from the config file
+                //  char carKey[32];
+                // snprintf(carKey, sizeof(carKey), "car%d=%s", selected + 1, screens[selected]);
+                // printf(carKey);
+                // char temp[(numScreens)* 10];// 9 char + delim
+                // temp[0] = '\0'; // initialize the string
+                // int carCount = numScreens - 1; // exclude BACK option
+                // for(int i = 0; i < carCount; i++) {
+                //     if (i == selected) {
+                //         continue; // skip the selected car
+                //     }
+                //     strcat(temp, screens[i]);
+                //     if (i < carCount - 1) {
+                //         strcat(temp, ","); // add delimiter
+                //     }
+                // }
+
+                // printf("Updating config with: %s\n", temp);
+                // if(!update_config("cars=", temp)){
+                //     printf("Failed to update config file with new cars.\n");
+                //     return -1; // exit if failed
+                // }
+                // char newCurrentCars[16];
+                // snprintf(newCurrentCars, sizeof(newCurrentCars), "%d", carCount - 1);
+                // if(!update_config("currentCars=", newCurrentCars)){
+                //     printf("Failed to update current cars in config file.\n");
+                //     return -1; // exit if failed
+                // }
+                // // todo:
+                // // update the car array
+                // // update the currentCars variable
+                // // poss create a function to get the config data, so i dont have to rewrite the code in init
+            }
             break;
         case 4: // quit
             printf("Exiting...\n");
