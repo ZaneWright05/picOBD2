@@ -20,14 +20,6 @@ UWORD imageBuffer[OLED_1in3_C_WIDTH * OLED_1in3_C_HEIGHT / 8];
 int maxCars = 0;
 int currentCars = 0;
 
-// void gpio_callback(uint gpio, uint32_t events) {
-//     if (gpio == KEY0) {
-//         handleKey0Press();
-//     } else if (gpio == KEY1) {
-//         handleKey1Press();
-//     }
-// }
-
 int populate_car_array(char carArray[][9] , int currentCars, int maxCars){
     for (int i = 0; i < maxCars + 1; i++) {
         strcpy(carArray[i], "");
@@ -150,7 +142,7 @@ int main(void)
     OLED_1in3_C_Init();
     OLED_1in3_C_Clear();
 
-    // // // UI setup from waveshare: https://www.waveshare.com/wiki/Pico-OLED-1.3#Overview
+    //  UI setup from waveshare: https://www.waveshare.com/wiki/Pico-OLED-1.3#Overview
     UBYTE *BlackImage;
     UWORD Imagesize = ((OLED_1in3_C_WIDTH%8==0)? (OLED_1in3_C_WIDTH/8): (OLED_1in3_C_WIDTH/8+1)) * OLED_1in3_C_HEIGHT;
     if((BlackImage = (UBYTE *)malloc(Imagesize)) == NULL) {
@@ -193,7 +185,6 @@ int main(void)
         return -1;
     }
 
-    
     load_screen(BlackImage, userName);
     printf("Entering menu screen...\n");
     int numOfScreens = 5; // number of screens in the menu
@@ -210,9 +201,11 @@ int main(void)
             printf("Entering real-time data screen...\n");
             realTimeDataScreen(BlackImage);
             break;
+
         case 1: // settings
             printf("Entering settings screen...\n");
             break;
+
         case 2: // add car
             // print_config();
             printf("Entering add car screen...\n");
@@ -234,6 +227,7 @@ int main(void)
             free(carName);
             // print_config();
             break;
+
         case 3: // view entered cars
             printf("Entering view cars screen...\n");
             currentCars = get_current_cars();
@@ -266,12 +260,9 @@ int main(void)
                     continue; // skip to the next iteration
                 }
                 print_config();
-                // // todo:
-                // // update the car array
-                // // update the currentCars variable
-                // // poss create a function to get the config data, so i dont have to rewrite the code in init
             }
             break;
+
         case 4: // quit
             printf("Exiting...\n");
             for (int i = 0; i < numOfScreens; i++) {
@@ -283,15 +274,12 @@ int main(void)
             DEV_Module_Exit();
             free(BlackImage);
             return 0; // exit the program
+
         default:
             printf("Entering car screen...\n");
             // based on the choice, can determine which car to show
             break;
         }
     }
-    for (int i = 0; i < numOfScreens; i++) {
-        if (screens[i] != NULL) {
-            free(screens[i]);
-        }
-    }
+    return 0;
 }
