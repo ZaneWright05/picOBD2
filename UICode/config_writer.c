@@ -187,3 +187,26 @@ void print_config(){
     f_unmount("");
     printf("End of config file contents.\n");
 }
+
+bool create_Dir(char * name){
+    bool result = true;
+    FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+        return false;
+    }
+    fr = f_mkdir(name);
+    if (FR_EXIST == fr) {
+        panic("Directory %s already exists.\n", name);
+        return false;
+    }
+    if (FR_OK == fr) {
+        printf("Directory %s created successfully.\n", name);
+    } else {
+        panic("f_mkdir(%s) error: %s (%d)\n", name, FRESULT_str(fr), fr);
+        result = false;
+    } 
+
+    return result;
+}

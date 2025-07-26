@@ -19,6 +19,7 @@ typedef struct PIDEntry {
     char *unit;
     PIDForm form;
     int divisor;
+    bool supported;
 } PIDEntry;
 
 int tempForm(int a, int b, float c) { return a - 40; }
@@ -33,120 +34,49 @@ int stdShift(int a, int b, float c) { return (a << 8) + b; }
 
 int stdShiftDiv(int a, int b, float divisor) { return stdShift(a, b, 1) / divisor; }
 
-const int dirSize = 30;
+const int dirSize = 28;
 
-const PIDEntry pid_Dir[] = {
-    {0x00, "PID check 01-20","N/A", NULL, 1.0f},
-    {0x04, "Engine Load", "%", toPercentage, 1.0f},
-    {0x05, "Coolant Temp", "C", tempForm, 1.0f},
-    {0x0A, "Fuel Pressure", "kPA", tripleA, 1.0f},
-    {0x0B, "Int manif Press", "kPA", justA, 1.0f},
-    {0x0C, "Eng Speed", "RPM", stdShiftDiv, 4.0f},
-    {0x0D, "Veh Speed", "km/h", justA, 1.0f},
-    {0x0F, "Int Temp", "C", tempForm, 1.0f},
-    {0x10, "MAF Air Flow", "g/s", stdShiftDiv, 100.0f},
-    {0x11, "Throttle Pos", "%", toPercentage, 1.0f},
-    {0x1C, "OBD2 std", "", NULL, 1.0f},
-    {0x1F, "R.T. since strt", "s", stdShift, 1.0f},
-    {0x20, "PID check 21-40","N/A", NULL, 1.0f},
-    {0x21, "Dist with MIL", "km", stdShift, 1.0f},
-    {0x22, "Fuel Press", "kPA", stdShiftDiv, 12.658f},
-    {0x23, "Fuel Press", "kPA", stdShiftDiv, 0.1f},
-    {0x30, "Warm ups since clear", "times", justA, 1.0f},
-    {0x31, "Dist since clear", "km", stdShift, 1.0f},
-    {0x33, "Absolute baro press", "kPA", stdShift, 1.0f},
-    {0x40, "PID check 41-60", "N/A", NULL, 1.0f},
-    {0x45, "Rel thrttle pos", "%", toPercentage, 1.0f},
-    {0x46, "Ambient air temp", "C", tempForm, 1.0f},
-    {0x47, "Absol thrrl pos B", "%", toPercentage, 1.0f},
-    {0x48, "Absol thrrl pos C", "%", toPercentage, 1.0f},
-    {0x49, "Absol thrrl pos D", "%", toPercentage, 1.0f},
-    {0x4A, "Absol thrrl pos E", "%", toPercentage, 1.0f},
-    {0x4B, "Absol thrrl pos F", "%", toPercentage, 1.0f},
-    {0x4D, "Time w/ MIL on", "mins", stdShift, 1.0f},
-    {0x4E, "Time since trbl clear", "min", stdShift, 1.0f},
-    {0x51, "Fuel type", NULL, NULL, 1.0f},
-    {0x5C, "Eng Oil temp", "C", tempForm, 1.0f}
+PIDEntry pid_Dir[] = {
+    {0x04, "Engine Load", "%", toPercentage, 1.0f, false},
+    {0x05, "Coolant Temp", "C", tempForm, 1.0f, false},
+    {0x0A, "Fuel Pressure", "kPA", tripleA, 1.0f, false},
+    {0x0B, "Int manif Press", "kPA", justA, 1.0f, false},
+    {0x0C, "Eng Speed", "RPM", stdShiftDiv, 4.0f, false},
+    {0x0D, "Veh Speed", "km/h", justA, 1.0f, false},
+    {0x0F, "Int Temp", "C", tempForm, 1.0f, false},
+    {0x10, "MAF Air Flow", "g/s", stdShiftDiv, 100.0f, false},
+    {0x11, "Throttle Pos", "%", toPercentage, 1.0f, false},
+    {0x1C, "OBD2 std", "", NULL, 1.0f, false},
+    {0x1F, "R.T. since strt", "s", stdShift, 1.0f, false},
+    {0x21, "Dist with MIL", "km", stdShift, 1.0f, false},
+    {0x22, "Fuel Press", "kPA", stdShiftDiv, 12.658f, false},
+    {0x23, "Fuel Press", "kPA", stdShiftDiv, 0.1f, false},
+    {0x30, "Warm ups since clear", "times", justA, 1.0f, false},
+    {0x31, "Dist since clear", "km", stdShift, 1.0f, false},
+    {0x33, "Absolute baro press", "kPA", stdShift, 1.0f, false},
+    {0x45, "Rel thrttle pos", "%", toPercentage, 1.0f, false},
+    {0x46, "Ambient air temp", "C", tempForm, 1.0f, false},
+    {0x47, "Absol thrrl pos B", "%", toPercentage, 1.0f, false},
+    {0x48, "Absol thrrl pos C", "%", toPercentage, 1.0f, false},
+    {0x49, "Absol thrrl pos D", "%", toPercentage, 1.0f, false},
+    {0x4A, "Absol thrrl pos E", "%", toPercentage, 1.0f, false},
+    {0x4B, "Absol thrrl pos F", "%", toPercentage, 1.0f, false},
+    {0x4D, "Time w/ MIL on", "mins", stdShift, 1.0f, false},
+    {0x4E, "Time since trbl clear", "min", stdShift, 1.0f, false},
+    {0x51, "Fuel type", NULL, NULL, 1.0f, false},
+    {0x5C, "Eng Oil temp", "C", tempForm, 1.0f, false}
 };
 
-bool fill_in_PIDs(bool PIDarr[200], uint8_t frames[4], int init_PID, int recursePid){
-    for (int j = 0; j < 4; j++) {
-        int bit = 0;
-        for (int i = 7; i >= 0; i--) {
-            bit = (frames[j] >> i) & 1;
-            if (bit) {
-                char PID[3];
-                sprintf(PID, "%02X", init_PID);
-                PIDarr[init_PID] = true; // Mark PID as supported
-                printf("%02X ", init_PID);
-            }
-            else {
-                PIDarr[init_PID] = false; // Mark PID as not supported
-            }
-            init_PID++;
-        }
+bool check_Single_PID(uint8_t response[4], uint8_t pid, uint8_t basePid){
+    if(pid < basePid || pid > basePid + 31) {
+        printf("PID %02X is out of range for the response frame.\n", pid);
+        return false;
     }
-    if (PIDarr[recursePid]) {
-        return true;
-    }
-    return false;
+    uint8_t index = pid - basePid; // position out of th 32 pids
+    uint8_t byte = index / 8; // which byte holds the PID
+    uint8_t bit = 7 - (index % 8); // which bit in the byte holds the PID
+    return (response[byte] >> bit) & 0x01; // check if the bit is set
 }
-
-bool get_Supported_PIDs(uint8_t *frame, int startPid, int endPid) {
-
-    if(frame[0] != 0x06){
-        printf("Incorrect frame length for PID request: %02X\n", frame[0]);
-        return;
-    }
-    if(frame[1] != 0x41){ // correct mode
-        printf("Incorrect mode for PID request: %02X\n", frame[1]);
-        return;
-    }
-    // if(frame[2] != 0x00){ // correct PID
-    //     printf("Incorrect PID for request: %02X\n", frame[2]);
-    //     return;
-    // }
-    uint8_t dataByte1 = frame[3];
-    uint8_t dataByte2 = frame[4]; 
-    uint8_t dataByte3 = frame[5];
-    uint8_t dataByte4 = frame[6];
-    printf("Supported PIDs: ");
-    uint8_t frames_arr[4] = {dataByte1, dataByte2, dataByte3, dataByte4};
-    bool res = fill_in_PIDs(PIDarr, frames_arr, startPid,endPid);
-
-    // fill_in_PIDs(PIDarr, dataByte2, 9);
-    // fill_in_PIDs(PIDarr, dataByte3, 17);
-    // fill_in_PIDs(PIDarr, dataByte4, 25);
-    printf("\nfor this frame, ");
-
-    if(res){
-        printf("recurse expected.\n");
-    }
-    else{
-        printf("recurse not expected.\n");
-    }
-    return res;
-}
-// structure for using fill in PIDS
-// while (fill_in_PIDs(PIDarr, frames, init_PID)) {
-//     init pid moved to the next set of 32 pids
-//     excract the pid, for the first step 20
-//     perform the query to get the next frame, using PID
-//   }
-
-
-void print_byte_to_PID(uint8_t byte, int init_PID) {
-    for (int i = 7; i >= 0; i--) {
-        // printf("%d", (byte >> i) & 1);
-        int bit = (byte >> i) & 1;
-        if (bit) {
-            printf("%02X ", init_PID);
-        }
-        init_PID++;
-    }
-    printf(" "); // optional spacing
-}
-
 
 void main(){
     int numOfFrames = 7;
@@ -159,34 +89,33 @@ void main(){
         {0x06, 0x41, 0xa1, 0xc2, 0xd3, 0xe4, 0xf5, 0xaa}, // C2 - E2
         {0x06, 0x41, 0xc1, 0xd2, 0xe3, 0xf4, 0xa5, 0xaa} // E3 - F3
     };
-    int sumOfPids = 0;
-    int init_PID = 0x01; // starting PID
-    int end_PID = 0x20; // ending PID
-    for (int i = 0; i < numOfFrames; i++) {
-        printf("Frame %d: ", i + 1);
-        if(get_Supported_PIDs(frames[i], init_PID, end_PID)){
-            init_PID += 32;
-            end_PID += 32;
-            for (int j = 0; j < 8; j++) {
-                if (PIDarr[j]){
-                    sumOfPids += init_PID + j;
-                }
-            }
-        } else{
-            break;
-        }
-    }
-    printf("\nEncoded PID as a sum: %d\n", sumOfPids);
-    for (int i = 0; i < 200; i++) {
-        printf("PID %02X: %d\n", i, PIDarr[i]);
-    }
+    int frameIndex = 0; // current frame index
+    uint8_t basePid = 0x01;
+    uint8_t dataFromResponse[4] = {frames[frameIndex][3], frames[frameIndex][4], frames[frameIndex][5], frames[frameIndex][6]}; // to hold the response data
     for (int i = 0; i < dirSize; i++){
-        if(PIDarr[pid_Dir[i].pid]) {
-            PIDEntry current = pid_Dir[i];
-            printf("%s is supported, its code is %02X, and is unit %s\n", current.name, current.pid, current.unit);
-            if(current.form == NULL){continue;}
-            printf("Example calc with A = 10, B = 20: %d\n", current.form(10, 20, current.divisor));
+        PIDEntry entry = pid_Dir[i];
+        uint8_t pid = entry.pid;
+        if (pid > basePid + 31) {
+            printf("Moving to frame %d for PIDs %02X to %02X\n", frameIndex + 1, basePid, basePid + 31);
+            basePid += 32; // move to the next set of 32 PIDs
+            if (!check_Single_PID(dataFromResponse, basePid - 1, basePid - 32)) {
+                printf("Next set of PIDs not supported\n");
+                break;
+            } else {
+                printf("Next set of PIDs supported\n");
+            }
+            frameIndex++; // move to the next frame
+            dataFromResponse[0] = frames[frameIndex][3];
+            dataFromResponse[1] = frames[frameIndex][4];
+            dataFromResponse[2] = frames[frameIndex][5];
+            dataFromResponse[3] = frames[frameIndex][6];
         }
+        pid_Dir[i].supported = check_Single_PID(dataFromResponse, pid, basePid);
+    }
+
+    for(int i = 0; i < dirSize; i++){
+        PIDEntry entry = pid_Dir[i];
+        printf("PID %02X (%s), supported? %d\n", entry.pid, entry.name, entry.supported);
     }
 }
 
@@ -240,4 +169,81 @@ void query_PID(int pid){
 //             printf("Log write time: %dus\n", absolute_time_diff_us(t_log_start, t_log_end));
 //         }
 //     }
+// }
+// bool fill_in_PIDs(bool PIDarr[200], uint8_t frames[4], int init_PID, int recursePid){
+//     for (int j = 0; j < 4; j++) {
+//         int bit = 0;
+//         for (int i = 7; i >= 0; i--) {
+//             bit = (frames[j] >> i) & 1;
+//             if (bit) {
+//                 char PID[3];
+//                 sprintf(PID, "%02X", init_PID);
+//                 PIDarr[init_PID] = true; // Mark PID as supported
+//                 printf("%02X ", init_PID);
+//             }
+//             else {
+//                 PIDarr[init_PID] = false; // Mark PID as not supported
+//             }
+//             init_PID++;
+//         }
+//     }
+//     if (PIDarr[recursePid]) {
+//         return true;
+//     }
+//     return false;
+// }
+
+// bool get_Supported_PIDs(uint8_t *frame, int startPid, int endPid) {
+
+//     if(frame[0] != 0x06){
+//         printf("Incorrect frame length for PID request: %02X\n", frame[0]);
+//         return;
+//     }
+//     if(frame[1] != 0x41){ // correct mode
+//         printf("Incorrect mode for PID request: %02X\n", frame[1]);
+//         return;
+//     }
+//     // if(frame[2] != 0x00){ // correct PID
+//     //     printf("Incorrect PID for request: %02X\n", frame[2]);
+//     //     return;
+//     // }
+//     uint8_t dataByte1 = frame[3];
+//     uint8_t dataByte2 = frame[4]; 
+//     uint8_t dataByte3 = frame[5];
+//     uint8_t dataByte4 = frame[6];
+//     printf("Supported PIDs: ");
+//     uint8_t frames_arr[4] = {dataByte1, dataByte2, dataByte3, dataByte4};
+//     bool res = fill_in_PIDs(PIDarr, frames_arr, startPid,endPid);
+
+//     // fill_in_PIDs(PIDarr, dataByte2, 9);
+//     // fill_in_PIDs(PIDarr, dataByte3, 17);
+//     // fill_in_PIDs(PIDarr, dataByte4, 25);
+//     printf("\nfor this frame, ");
+
+//     if(res){
+//         printf("recurse expected.\n");
+//     }
+//     else{
+//         printf("recurse not expected.\n");
+//     }
+//     return res;
+// }
+// // structure for using fill in PIDS
+// // while (fill_in_PIDs(PIDarr, frames, init_PID)) {
+// //     init pid moved to the next set of 32 pids
+// //     excract the pid, for the first step 20
+// //     perform the query to get the next frame, using PID
+// //   }
+
+
+// void print_byte_to_PID(uint8_t byte, int init_PID) {
+//     for (int i = 7; i >= 0; i--) {
+//         // printf("%d", (byte >> i) & 1);
+//         int bit = (byte >> i) & 1;
+//         if (bit) {
+//             printf("%02X ", init_PID);
+//         }
+//         init_PID++;
+//     }
+//     printf(" "); // optional spacing
 // }

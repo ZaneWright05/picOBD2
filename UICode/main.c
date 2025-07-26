@@ -7,117 +7,70 @@
 #include "hardware/timer.h"
 #include "config_writer.h"
 #include "ui.h"
+#include "pid.h"
 
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
 
 UWORD imageBuffer[OLED_1in3_C_WIDTH * OLED_1in3_C_HEIGHT / 8];
 
-// for the config file, updating 
-// config file updated -> this will be used as a fixed truth 
-// i.e when ever a car is added or removed we take from config so that the code state and the cofig always match)
-
-int maxCars = 0;
-int currentCars = 0;
-
-int populate_car_array(char carArray[][9] , int currentCars, int maxCars){
-    for (int i = 0; i < maxCars + 1; i++) {
-        strcpy(carArray[i], "");
-    }
-
-    int strLen = 10*currentCars; // 8 chars, delimiter, null terminator
-    char *carStr = malloc(strLen);
-    if(carStr == NULL){
-        printf("Failed to allocate memory for car string\n");
-        return 0;
-    }
-    find_in_config("cars=", carStr, strLen);
-    if (strlen(carStr) == 0) {
-        free(carStr);
-        return 0;
-    }
-    char *token = strtok(carStr, ",");
-    int index = 0;
-    while (token != NULL) {
-        strcpy(carArray[index], token);
-        index++;
-        token = strtok(NULL, ",");
-    }
-    strcpy(carArray[currentCars], "BACK"); // add BACK option 
-    free(carStr);
-    return index;
-}
-
-bool increment_current_cars(){
-    char temp[16];
-    if(find_in_config("currentCars=", temp, sizeof(temp))){
-        currentCars = atoi(temp);
-    } else{
-        currentCars = 0;
-    }
-    currentCars++;
-    char currentCarsStr[16];
-    snprintf(currentCarsStr, sizeof(currentCarsStr), "%d", currentCars);
-    if(!update_config("currentCars=", currentCarsStr)){
-        printf("Failed to update current cars in config file.\n");
-        return false; // exit if failed
-    }
-    return true;
-}
-
-bool decrement_current_cars(){
-    char temp[16];
-    if(find_in_config("currentCars=", temp, sizeof(temp))){
-        currentCars = atoi(temp);
-    } else{
-        currentCars = 0;
-    }
-    if(currentCars <= 0) {
-        printf("Current cars is already 0, cannot decrement.\n");
-        return false; // exit if failed
-    }
-    currentCars--;
-    char currentCarsStr[16];
-    snprintf(currentCarsStr, sizeof(currentCarsStr), "%d", currentCars);
-    if(!update_config("currentCars=", currentCarsStr)){
-        printf("Failed to update current cars in config file.\n");
-        return false; // exit if failed
-    }
-    return true;
-}
-
-int get_current_cars(){
-    char temp[16];
-    if(find_in_config("currentCars=", temp, sizeof(temp))){
-        currentCars = atoi(temp);
-    } else{
-        currentCars = 0;
-    }
-    return currentCars;
-}
-
-bool add_Car_to_config(const char *carName){
-    if (carName == NULL  || strlen(carName) == 0) {
-        printf("Invalid car name\n");
+// helper function, takes a PID and the base 0x01, 0x21, ..., 
+bool check_Single_PID(uint8_t response[4], uint8_t pid, uint8_t basePid){
+    if(pid < basePid || pid > basePid + 31) {
+        printf("PID %02X is out of range for the response frame.\n", pid);
         return false;
     }
-    char msg[128] = {0};
-    find_in_config("cars=", msg, sizeof(msg)); // get the current cars from the config
-    int currentCars = get_current_cars();
-    if (!currentCars){
-        strcpy(msg, ""); // if no cars, start with empty string
-        strcat(msg, carName); // add the new car name
+    uint8_t index = pid - basePid; // position out of th 32 pids
+    uint8_t byte = index / 8; // which byte holds the PID
+    uint8_t bit = 7 - (index % 8); // which bit in the byte holds the PID
+    return (response[byte] >> bit) & 0x01; // check if the bit is set
+}
+
+int scanForPIDs() {
+    uint8_t frames[7][8] = {
+        // {0x06, 0x41, 0x00, 0x98, 0x3B, 0x80, 0x13, 0xAA}, // 1 - 20
+        {0x06, 0x41, 0x00, 0x12, 0x34, 0x56, 0x78, 0xaa} ,
+        {0x06, 0x41, 0x20, 0xA0, 0x19, 0xA0, 0x01, 0xAA}, // 21 - 40
+        {0x06, 0x41, 0x40, 0x40, 0xDE, 0x00, 0x00, 0xAA}, // 41 - 60 // should stop here
+        {0x06, 0x41, 0x60, 0x12, 0x34, 0x56, 0x78, 0xAA}, // 61 - 80
+        {0x06, 0x41, 0x80, 0x12, 0x34, 0x56, 0x78, 0xAA}, // A1 - C1
+        {0x06, 0x41, 0xa1, 0xc2, 0xd3, 0xe4, 0xf5, 0xaa}, // C2 - E2
+        {0x06, 0x41, 0x00, 0x12, 0x34, 0x56, 0x78, 0xaa} // E3 - F3
+    };
+    int frameIndex = 0; // current frame index
+    int supportedPIDs = 0; // count of supported PIDs
+    uint8_t basePid = 0x01;
+    uint8_t dataFromResponse[4] = {frames[frameIndex][3], frames[frameIndex][4], frames[frameIndex][5], frames[frameIndex][6]}; // to hold the response data
+    for (int i = 0; i < dirSize; i++){
+        PIDEntry entry = pid_Dir[i];
+        uint8_t pid = entry.pid;
+        if (pid > basePid + 31) {
+            // printf("Moving to frame %d for PIDs %02X to %02X\n", frameIndex + 1, basePid, basePid + 31);
+            basePid += 32; // move to the next set of 32 PIDs
+            if (!check_Single_PID(dataFromResponse, basePid - 1, basePid - 32)) {
+                printf("Next set of PIDs not supported\n");
+                break;
+            } else {
+                printf("Next set of PIDs supported\n");
+            }
+            frameIndex++; // move to the next frame
+            dataFromResponse[0] = frames[frameIndex][3];
+            dataFromResponse[1] = frames[frameIndex][4];
+            dataFromResponse[2] = frames[frameIndex][5];
+            dataFromResponse[3] = frames[frameIndex][6];
+        }
+        bool result = check_Single_PID(dataFromResponse, pid, basePid);
+        if (result) {
+            supportedPIDs++;
+        }
+        pid_Dir[i].supported = result;
     }
-    else{
-        strcat(msg, ","); // add a comma to the end
-        strcat(msg, carName); // add the new car name
-    }
-    printf("Adding car to config: %s\n", msg);
-    if(!update_config("cars=", msg)){
-        printf("Failed to update config file with new car.\n");
-        return false; // exit if failed
-    }
-    return true;
+    printf("Total supported PIDs: %d\n", supportedPIDs);
+    return supportedPIDs;
+    // for(int i = 0; i < dirSize; i++){
+    //     PIDEntry entry = pid_Dir[i];
+    //     printf("PID %02X (%s), supported? %d\n", entry.pid, entry.name, entry.supported);
+    // }
 }
 
 int main(void)
@@ -161,39 +114,15 @@ int main(void)
     if(!find_in_config("username=", userName, sizeof(userName))){
         strcpy(userName, "<user>"); // default username if not found
     }
-    
-    char temp[16];
-    if(find_in_config("maxCars=", temp, sizeof(temp))){
-        maxCars = atoi(temp);
-    } else{
-        maxCars = 0;
-    }
-    printf("Max cars: %d\n", maxCars);
-
-    currentCars = get_current_cars();
-    printf("Current cars: %d\n", currentCars);
-    // when new cars are added need to move back + 1 // back option for the menu
-
-    char carArray[maxCars][9]; // 0 to maxCars (includes BACK), 9 char (name + null)
-    int foundCars = populate_car_array(carArray, currentCars ,maxCars);
-    if(!foundCars){
-        printf("Failed to populate car array\n");
-        return -1; // exit if failed
-    }
-    if(currentCars != foundCars) {
-        printf("Current car, does not match found cars, recommend resetting config file.\n");
-        return -1;
-    }
 
     load_screen(BlackImage, userName);
     printf("Entering menu screen...\n");
-    int numOfScreens = 5; // number of screens in the menu
+    int numOfScreens = 4; // number of screens in the menu
     char** screens = (char**)malloc(numOfScreens * sizeof(char*)); // allocate memory for the screens
     screens[0] = "QUICK       QUERY"; // spacing to use new line
-    screens[1] = "SETTINGS";
-    screens[2] = "ADD CAR";
-    screens[3] = "VIEW CARS";
-    screens[4] = "QUIT";
+    screens[1] = "DTC CHECK";
+    screens[2] = "SCAN AND    LOG";
+    screens[3] = "QUIT";
     while (1) {
         int choice = menu_Screen(BlackImage, numOfScreens, screens); // enter the menu screen loop
         switch (choice){
@@ -202,68 +131,21 @@ int main(void)
             realTimeDataScreen(BlackImage);
             break;
 
-        case 1: // settings
-            printf("Entering settings screen...\n");
-            break;
-
-        case 2: // add car
+        case 1: // add car
             // print_config();
-            printf("Entering add car screen...\n");
-            currentCars = get_current_cars();
-            if(currentCars >= maxCars && maxCars > 0) {
-                printf("Max cars reached, cannot add more.\n");
-                continue; // skip to the next iteration
-            }
-            char *carName = name_Car(BlackImage); // enter the name car screen
-            printf("Car name entered: %s\n", carName);
-            increment_current_cars();
-
-            if(!add_Car_to_config(carName)){
-                printf("Failed to add car to config file.\n");
-                free(carName); // free the car name memory
-                continue; // skip to the next iteration
-            }
-            printf("Car added: %s\n", carName);
-            free(carName);
+            printf("Entering dtc screen...\n");
             // print_config();
             break;
 
-        case 3: // view entered cars
-            printf("Entering view cars screen...\n");
-            currentCars = get_current_cars();
-            if(currentCars <= 0) {
-                printf("No cars entered yet.\n");
-                continue; // skip to the next iteration
-            }
-            populate_car_array(carArray, currentCars, maxCars);
-            int selectedCar = car_Screen(BlackImage, currentCars + 1, carArray); // number of cars + 1 for BACK option
-            // temporary reduction of current cars, curr any breakout will be a deleted car
-            if(selectedCar != -1){ // not BACK
-                print_config();
-                printf("Selected car: %s\n", carArray[selectedCar]);
-                decrement_current_cars();
-                currentCars = get_current_cars();
-                char temp[maxCars * 10];
-                bool first = true;
-                for(int i =0; i <= currentCars; i++){
-                    if(i == selectedCar) continue; // skip the selected car
-                    if(!first){
-                        strcat(temp, ",");
-                    }
-                    strcat(temp, carArray[i]);
-                    first = false;
-                    printf("i = %d, temp = %s\n", i, temp);
-                }
-                printf("Updating config with cars: %s\n", temp);
-                if(!update_config("cars=", temp)){
-                    printf("Failed to update config file with cars.\n");
-                    continue; // skip to the next iteration
-                }
-                print_config();
-            }
+        case 2: // scan and log
+            printf("Entering scan and log screen...\n");
+            int numToLog = chooseNumber(BlackImage); // choose number of PIDs to log
+            printf("Number of PIDs to log: %d\n", numToLog);
+            int supportedPIDs = scanForPIDs();
+            choosePIDs(BlackImage, pid_Dir, supportedPIDs, dirSize, numToLog);
             break;
 
-        case 4: // quit
+        case 3: // quit
             printf("Exiting...\n");
             for (int i = 0; i < numOfScreens; i++) {
                 free(screens[i]); // free the screen names

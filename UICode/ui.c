@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "pid.h"
 
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
@@ -78,6 +79,70 @@ void load_screen(UBYTE *BlackImage, char *userName) {
             key1Pressed = false;
         }
     }
+}
+
+int chooseNumber(UBYTE *image){
+    char * screens[6] = {"1", "2", "3", "4", "5", "6"};
+    int selected = 0;
+    while (1){
+        Paint_SelectImage(image);
+        Paint_Clear(BLACK);
+        Paint_DrawString_EN(0, 0, "PID log    count:", &Font16, WHITE, BLACK);
+        Paint_DrawString_EN(0, 40, screens[selected], &Font24, WHITE, BLACK);
+        OLED_1in3_C_Display(image);
+        pollButtons();
+        if (key0Pressed) {
+            key0Pressed = false;
+            selected = (selected + 1) % (6);
+        }
+        if  (key1Pressed) {
+            key1Pressed = false;
+            return selected + 1; 
+        }
+    }
+}
+
+PIDEntry * choosePIDs(UBYTE *image, PIDEntry *pid_Dir, int pidCount, int dirSize, int numToLog) {
+    PIDEntry * loggedPIDs = malloc(numToLog * sizeof(PIDEntry));
+    int logIndex = 0;
+    PIDEntry * screens = malloc(pidCount * sizeof(PIDEntry));
+    if (!screens || !loggedPIDs) {
+        printf("Memory allocation failed for screens or loggedPIDs.\n");
+        return NULL;
+    }
+    int index = 0;
+    for(int i = 0; i < dirSize; i++){
+        if (pid_Dir[i].supported) {
+            screens[index++] = pid_Dir[i];
+            if (index == pidCount) {
+                printf("Reached max screens limit: %d\n", pidCount);
+                break;
+            }
+        }
+    }
+    int selected = 0;
+    while (1){
+        Paint_SelectImage(image);
+        Paint_Clear(BLACK);
+        Paint_DrawString_EN(0, 20, screens[selected].name, &Font16, WHITE, BLACK);
+        OLED_1in3_C_Display(image);
+        pollButtons();
+        if (key0Pressed) {
+            key0Pressed = false;
+            selected = (selected + 1) % (index);
+        }
+        if  (key1Pressed) {
+            key1Pressed = false;
+            printf("Selected PID: %02X (%s)\n", screens[selected].pid, screens[selected].name);
+            numToLog--;
+            loggedPIDs[logIndex++] = screens[selected];
+            if (numToLog == 0) {
+                printf("Reached max PIDs to log.\n");
+                break;
+            }
+        }
+    }
+    return loggedPIDs;
 }
 
 int menu_Screen(UBYTE *image, int numScreens, char** screens) {
