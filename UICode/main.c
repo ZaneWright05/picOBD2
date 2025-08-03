@@ -142,7 +142,83 @@ int main(void)
             int numToLog = chooseNumber(BlackImage); // choose number of PIDs to log
             printf("Number of PIDs to log: %d\n", numToLog);
             int supportedPIDs = scanForPIDs();
-            choosePIDs(BlackImage, pid_Dir, supportedPIDs, dirSize, numToLog);
+            PIDEntry* chosenPIDS = choosePIDs(BlackImage, pid_Dir, supportedPIDs, dirSize, numToLog);
+            char * fileName = name_File(BlackImage); // get the file name
+            fileName = realloc(fileName, strlen(fileName) + 5);
+            char * csvHeader = malloc(512); // allocate memory for the CSV header
+            char * strBuffer = malloc(256);
+            if (!csvHeader || !strBuffer || !fileName) {
+                printf("Memory allocation failed for csvHeader.\n");
+                free(chosenPIDS);
+                free(screens);
+                free(BlackImage);
+                DEV_Module_Exit();
+                return -1; // exit with error
+            }
+            strcat(fileName,".csv");
+            strcpy(csvHeader, "Timestamp,");
+            for(int i = 0; i < numToLog; i++){
+                PIDEntry entry = chosenPIDS[i];
+                    if (i == numToLog - 1) {
+                        snprintf(strBuffer, 256, "%s", entry.name);
+                    } else {
+                        snprintf(strBuffer, 256, "%s,", entry.name);
+                    }
+                    strcat(csvHeader, strBuffer); // append the PID to the header
+            }
+            printf("CSV Header: %s\n", csvHeader);
+            free(strBuffer);
+            // now we can create the CSV file and begin logging
+            // have access to, array of PID entries, number of PIDS, file name, and csv header
+            int result = create_csv_file(fileName, csvHeader); // create the CSV file with the header
+            while(result == -2){
+                printf("File %s already exists. Please choose a different name.\n", fileName);
+                fileName = name_File(BlackImage); // get a new file name
+                snprintf(fileName, sizeof(fileName)+5, "%s.csv", fileName);
+                result = create_csv_file(fileName, csvHeader); // try to create the CSV file again
+            }
+            if (result < 0) {
+                printf("Failed to create CSV file.\n");
+                free(chosenPIDS);
+                free(screens);
+                free(BlackImage);
+                DEV_Module_Exit();
+                return -1; // exit with error
+            }
+            free(csvHeader);
+            printf("CSV file created: %s\n", fileName);
+
+            absolute_time_t start = get_absolute_time();
+            int time = 0; // time in seconds
+            strBuffer = calloc(256, sizeof(char));
+            FIL *csvFile = open_File(fileName); 
+            if (!csvFile) {
+                printf("Failed to open CSV file for logging.\n");
+                free(chosenPIDS);
+                free(BlackImage);
+                DEV_Module_Exit();
+                return -1; // exit with error
+            }
+            while (1) {
+                // need to try opening the file and keeping it open
+                absolute_time_t now = get_absolute_time();
+                uint64_t elapsed_time = absolute_time_diff_us(start, now);
+                if (elapsed_time >= 1000000) { // log every second
+                    start = now;
+                    time++;
+                    snprintf(strBuffer, 256, "%d,1,2,3\n", time); // line to write
+                    log_record(strBuffer, csvFile);
+                    printf("Time = %d.", time);
+                    if(time == 60){
+                        break;
+                    }
+                }
+            }
+            close_File(csvFile);
+            printf("Logging completed. Data saved to %s\n", fileName);
+            free(chosenPIDS);
+            free(strBuffer);
+            free(fileName);
             break;
 
         case 3: // quit

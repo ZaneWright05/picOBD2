@@ -3,6 +3,7 @@
 #include "ff.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 bool write_to_config(const char * msg){
     FATFS fs;
@@ -209,4 +210,83 @@ bool create_Dir(char * name){
     } 
 
     return result;
+}
+
+FIL* open_File(char* filename){
+ static FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+        return false;
+    }
+    FIL* fil = malloc(sizeof(FIL));
+    fr = f_open(fil, filename, FA_WRITE | FA_OPEN_APPEND);
+
+    if (FR_OK != fr) {
+        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
+        free(fil);
+        return false;
+    }
+    return fil;
+}
+
+bool close_File(FIL* fil) {
+    FRESULT fr = f_close(fil);
+    if (FR_OK != fr) {
+        printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
+        return false;
+    }
+    free(fil);
+    f_mount(NULL, "", 1);
+    return true;
+}
+
+int create_csv_file(const char *filename, const char *header) {
+    FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    FILINFO finfo;
+    if (FR_OK != fr) {
+        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+        return -1;
+    }
+    fr = f_stat(filename, &finfo);
+    if (FR_OK == fr) {
+        printf("File %s already exists.\n", filename);
+        return -2;
+    }
+
+    FIL fil;
+    fr = f_open(&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
+    
+    if (FR_OK != fr) {
+        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
+        return -1;
+    }
+
+    if (f_printf(&fil, "%s\n", header) < 0) {
+        printf("f_printf failed\n");
+        f_close(&fil);
+        return -1;
+    }
+
+    f_close(&fil);
+    f_unmount("");
+    return 0; // success
+}
+
+bool log_record(char* record, FIL* fil) {
+    FRESULT fr;
+    int len = f_printf(fil, record);
+    // printf("string to write: %s\n", record);
+    // printf("f_printf: %d\n", len);
+    if (len < 0) {
+        printf("f_printf error: %s (%d)\n", FRESULT_str(fr), fr);
+        return false;
+    }
+    fr = f_sync(fil);
+    if (FR_OK != fr) {
+        printf("f_sync error: %s (%d)\n", FRESULT_str(fr), fr);
+        return false;
+    }
+    return true;
 }

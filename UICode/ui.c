@@ -102,7 +102,7 @@ int chooseNumber(UBYTE *image){
     }
 }
 
-PIDEntry * choosePIDs(UBYTE *image, PIDEntry *pid_Dir, int pidCount, int dirSize, int numToLog) {
+PIDEntry* choosePIDs(UBYTE *image, PIDEntry *pid_Dir, int pidCount, int dirSize, int numToLog) {
     PIDEntry * loggedPIDs = malloc(numToLog * sizeof(PIDEntry));
     int logIndex = 0;
     PIDEntry * screens = malloc(pidCount * sizeof(PIDEntry));
@@ -120,11 +120,15 @@ PIDEntry * choosePIDs(UBYTE *image, PIDEntry *pid_Dir, int pidCount, int dirSize
             }
         }
     }
+    char str[20];
+    sprintf(str, "PIDs selected: %d/%d", logIndex, numToLog);
     int selected = 0;
     while (1){
         Paint_SelectImage(image);
         Paint_Clear(BLACK);
         Paint_DrawString_EN(0, 20, screens[selected].name, &Font16, WHITE, BLACK);
+        // Paint_DrawString_EN(OLED_1in3_C_HEIGHT - 20, OLED_1in3_C_WIDTH - 20, str, &Font8, WHITE, BLACK);
+        Paint_DrawString_EN(0, 0, str, &Font12, WHITE, BLACK);
         OLED_1in3_C_Display(image);
         pollButtons();
         if (key0Pressed) {
@@ -136,6 +140,7 @@ PIDEntry * choosePIDs(UBYTE *image, PIDEntry *pid_Dir, int pidCount, int dirSize
             printf("Selected PID: %02X (%s)\n", screens[selected].pid, screens[selected].name);
             numToLog--;
             loggedPIDs[logIndex++] = screens[selected];
+            sprintf(str, "PIDs selected: %d/%d", logIndex, numToLog + logIndex);
             if (numToLog == 0) {
                 printf("Reached max PIDs to log.\n");
                 break;
@@ -177,7 +182,7 @@ char convertToChar(int value) {
     return alphabet[value];
 }
 
-char* name_Car(UBYTE *BlackImage){
+char* name_File(UBYTE *BlackImage){
     int lineWidth = (OLED_1in3_C_WIDTH - 20)/ 8; // width of the line
     absolute_time_t start = get_absolute_time();
     bool visible = true; // toggle for the selected 
@@ -192,7 +197,7 @@ char* name_Car(UBYTE *BlackImage){
         }
         Paint_SelectImage(BlackImage);
         Paint_Clear(BLACK);
-        Paint_DrawString_EN(0, 0, "Enter Name:", &Font16, WHITE, BLACK);
+        Paint_DrawString_EN(0, 0, "Enter File Name:", &Font12, WHITE, BLACK);
         int y = 40;
         for (int i = 0; i < 8; i++) {
             int x1 = 2 + i * 16;
