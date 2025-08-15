@@ -8,6 +8,9 @@
 #include "config_writer.h"
 #include "ui.h"
 #include "pid.h"
+#include "lib/CAN/CAN_DEV_Config.h"
+#include "lib/CAN/MCP2515.h"
+
 
 #define KEY0 15 // GPIO key used for the screen btns
 #define KEY1 17
@@ -27,20 +30,14 @@ bool check_Single_PID(uint8_t response[4], uint8_t pid, uint8_t basePid){
 }
 
 int scanForPIDs() {
-    uint8_t frames[7][8] = {
-        // {0x06, 0x41, 0x00, 0x98, 0x3B, 0x80, 0x13, 0xAA}, // 1 - 20
-        {0x06, 0x41, 0x00, 0x12, 0x34, 0x56, 0x78, 0xaa} ,
-        {0x06, 0x41, 0x20, 0xA0, 0x19, 0xA0, 0x01, 0xAA}, // 21 - 40
-        {0x06, 0x41, 0x40, 0x40, 0xDE, 0x00, 0x00, 0xAA}, // 41 - 60 // should stop here
-        {0x06, 0x41, 0x60, 0x12, 0x34, 0x56, 0x78, 0xAA}, // 61 - 80
-        {0x06, 0x41, 0x80, 0x12, 0x34, 0x56, 0x78, 0xAA}, // A1 - C1
-        {0x06, 0x41, 0xa1, 0xc2, 0xd3, 0xe4, 0xf5, 0xaa}, // C2 - E2
-        {0x06, 0x41, 0x00, 0x12, 0x34, 0x56, 0x78, 0xaa} // E3 - F3
-    };
+    uint8_t searchFrame[8] = {0x02, 0x01, 0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}; // frame to send, mode 1 and PID 0x00
+    uint8_t response[8] = {0}; // buffer to hold the response
+    MCP2515_Send(0x7DF, searchFrame, 8); // send the frame
+    MCP2515_Receive(0x7E8, response); // receive the response
     int frameIndex = 0; // current frame index
     int supportedPIDs = 0; // count of supported PIDs
     uint8_t basePid = 0x01;
-    uint8_t dataFromResponse[4] = {frames[frameIndex][3], frames[frameIndex][4], frames[frameIndex][5], frames[frameIndex][6]}; // to hold the response data
+    uint8_t dataFromResponse[4] = {response[3], response[4], response[5], response[6]};
     for (int i = 0; i < dirSize; i++){
         PIDEntry entry = pid_Dir[i];
         uint8_t pid = entry.pid;
@@ -54,10 +51,18 @@ int scanForPIDs() {
                 printf("Next set of PIDs supported\n");
             }
             frameIndex++; // move to the next frame
-            dataFromResponse[0] = frames[frameIndex][3];
-            dataFromResponse[1] = frames[frameIndex][4];
-            dataFromResponse[2] = frames[frameIndex][5];
-            dataFromResponse[3] = frames[frameIndex][6];
+            searchFrame[2] = basePid - 1;
+            for(int j = 0; j < 8; j++) {
+                printf("%02X ", searchFrame[j]);
+            }
+            printf("\n");
+            MCP2515_Send(0x7DF, searchFrame, 8);
+            MCP2515_Receive(0x7E8, response);
+
+            dataFromResponse[0] = response[3];
+            dataFromResponse[1] = response[4];
+            dataFromResponse[2] = response[5];
+            dataFromResponse[3] = response[6];
         }
         bool result = check_Single_PID(dataFromResponse, pid, basePid);
         if (result) {
@@ -72,6 +77,21 @@ int scanForPIDs() {
     //     printf("PID %02X (%s), supported? %d\n", entry.pid, entry.name, entry.supported);
     // }
 }
+
+int query_CAN(uint8_t PID) {
+    uint8_t frame[8] = {0x02, 0x01, PID, 0x00, 0x00, 0x00, 0x00, 0x00};// frame to send, 2 bytes, mode 1 and the PID
+    uint32_t canID = 0x7DF; // broadcast ID
+    uint8_t reply[8] = {0};
+    MCP2515_Send(canID, frame, 8); // send the frame
+    MCP2515_Receive(0x7E8, reply); // receive the response
+    printf("Received reply: ");
+    for (int i = 0; i < 8; i++) {
+        printf("%02X ", reply[i]);
+    }
+    printf("\n");
+    return 0;
+}
+
 
 int main(void)
 {   
@@ -90,6 +110,9 @@ int main(void)
     while(!stdio_usb_connected()) {
         sleep_ms(100); // wait for USB to be connected
     }
+
+    CAN_DEV_Module_Init();
+    MCP2515_Init();
 
     DEV_Delay_ms(100);
     OLED_1in3_C_Init();

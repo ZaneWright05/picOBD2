@@ -112,11 +112,15 @@ void main(){
         }
         pid_Dir[i].supported = check_Single_PID(dataFromResponse, pid, basePid);
     }
-
+    int countSupported = 0;
     for(int i = 0; i < dirSize; i++){
         PIDEntry entry = pid_Dir[i];
         printf("PID %02X (%s), supported? %d\n", entry.pid, entry.name, entry.supported);
+        if (entry.supported) {
+            countSupported++;
+        }
     }
+    printf("Total supported PIDs: %d\n", countSupported);
 }
 
 void query_PID(int pid){

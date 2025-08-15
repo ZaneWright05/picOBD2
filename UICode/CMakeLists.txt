@@ -43,6 +43,8 @@ hw_config.c
 config_writer.c
 ui.c
 pid.c
+lib/CAN/MCP2515.c
+lib/CAN/CAN_DEV_Config.c
 )
 
 # enable usb output, disable uart output
