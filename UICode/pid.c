@@ -5,8 +5,8 @@ int tempForm(int a, int b, float c) { return a - 40; }
 int justA(int a, int b, float c) { return a; }
 int tripleA(int a, int b, float c) { return 3 * a; }
 int toPercentage(int a, int b, float c) { return (int) ((a * 100.0) / 255.0); }
-int stdShift(int a, int b, float c) { return (a << 8) + b; }
-int stdShiftDiv(int a, int b, float divisor) { return stdShift(a, b, 1) / divisor; }
+int stdShift(int a, int b, float c) { return (a << 8) + b; } // 256*a + b
+int stdShiftDiv(int a, int b, float divisor) { return stdShift(a, b, 1.0) / divisor; } // 256*a + b / divisor
 
 const int dirSize = 28;
 

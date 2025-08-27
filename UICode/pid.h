@@ -11,7 +11,7 @@ typedef struct PIDEntry {
     char *name;
     char *unit;
     PIDForm form;
-    int divisor;
+    float divisor;
     bool supported;
 } PIDEntry;
 

@@ -36,8 +36,8 @@
 function:	
 		Define the full screen height length of the display
 ********************************************************************************/
-#define USE_SPI 1
-#define USE_IIC 0
+#define USE_SPI 0
+#define USE_IIC 1
 
 #define IIC_CMD        0X00
 #define IIC_RAM        0X40

@@ -34,7 +34,8 @@ bool find_in_config(const char* key, char* value, size_t value_size) {
     FATFS fs;
     FRESULT fr = f_mount(&fs, "", 1);
     if (FR_OK != fr) {
-        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+        printf("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+        return false;
     }
 
     FIL fil;
@@ -54,11 +55,13 @@ bool find_in_config(const char* key, char* value, size_t value_size) {
             while (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r')) { // remove trailing newlines
                 value[--len] = '\0';
             }
+            // f_unmount("");
             return true;
         }
     }
 
     f_close(&fil);
+    // f_unmount("");
     return false;
 }
 
@@ -213,7 +216,8 @@ bool create_Dir(char * name){
 }
 
 FIL* open_File(char* filename){
- static FATFS fs;
+    printf("Opening file: %s\n", filename);
+    static FATFS fs;
     FRESULT fr = f_mount(&fs, "", 1);
     if (FR_OK != fr) {
         panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
@@ -231,6 +235,7 @@ FIL* open_File(char* filename){
 }
 
 bool close_File(FIL* fil) {
+    printf("Closing file\n");
     FRESULT fr = f_close(fil);
     if (FR_OK != fr) {
         printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
@@ -242,6 +247,7 @@ bool close_File(FIL* fil) {
 }
 
 int create_csv_file(const char *filename, const char *header) {
+    printf("Creating CSV file: %s\n", filename);
     FATFS fs;
     FRESULT fr = f_mount(&fs, "", 1);
     FILINFO finfo;

@@ -150,6 +150,15 @@ PIDEntry* choosePIDs(UBYTE *image, PIDEntry *pid_Dir, int pidCount, int dirSize,
     return loggedPIDs;
 }
 
+int draw_Number(UBYTE *image, int number) {
+    Paint_SelectImage(image);
+    Paint_Clear(BLACK);
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%d", number);
+    Paint_DrawString_EN(0, 0, buffer, &Font16, WHITE, BLACK);
+    return 0;
+}
+
 int menu_Screen(UBYTE *image, int numScreens, char** screens) {
     int selected = 0;
     while (1){
