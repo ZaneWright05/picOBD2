@@ -1,12 +1,12 @@
 ﻿#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "OLED_1in3_c.h"
-#include "GUI_Paint.h"
+// #include "OLED_1in3_c.h"
+// #include "GUI_Paint.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
 #include "config_writer.h"
-#include "ui.h"
+// #include "ui.h"
 #include "pid.h"
 #include "lib/CAN/CAN_DEV_Config.h"
 #include "lib/CAN/MCP2515.h"
@@ -37,9 +37,9 @@ int scanForPIDs() {
     //     {0x06, 0x41, 0xc1, 0xd2, 0xe3, 0xf4, 0xa5, 0xaa} // E3 - F3
     // };
     uint8_t searchFrame[8] = {0x02, 0x01, 0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}; // frame to send, mode 1 and PID 0x00
-    uint8_t response[8] = {0}; // buffer to hold the response
-    MCP2515_Send(0x7DF, searchFrame, 8); // send the frame
-    MCP2515_Receive(0x7E8, response); // receive the response
+    uint8_t response[8] = {0x06, 0x41, 0x40, 0x40, 0xDE, 0x00, 0x00, 0xAA}; // buffer to hold the response
+    // MCP2515_Send(0x7DF, searchFrame, 8); // send the frame
+    // MCP2515_Receive(0x7E8, response); // receive the response
     int frameIndex = 0; // current frame index
     int supportedPIDs = 0; // count of supported PIDs
     uint8_t basePid = 0x01;
@@ -118,29 +118,34 @@ void printPIDs(PIDEntry* pids, int max) {
     }
 }
 
+char inputBuffer[32];
+int inputPos = 0;
+int nonBlockRead(){
+    int ch = getchar_timeout_us(0);
+    if (ch == PICO_ERROR_TIMEOUT) return -1;
+    if (ch == '\n' || ch == '\r'){
+        inputBuffer[inputPos] = '\0';
+        inputPos = 0;
+        return 1;
+    } else if (inputPos < sizeof(inputBuffer) - 1){
+        inputBuffer[inputPos++] = (char)ch;
+    }
+   return 0;
+}
+
 int main(void)
 {   
     stdio_init_all();
-
 
     while(!stdio_usb_connected()) {
         sleep_ms(100); // wait for USB to be connected
     }
     
-    // stdio_init_all();
-    //  absolute_time_t test = get_absolute_time();
     CAN_DEV_Module_Init();
     MCP2515_Init();
-    // absolute_time_t test2 = get_absolute_time();
-    // printf("MCP2515 init time: %lld us\n", absolute_time_diff_us(test, test2));
-
-    // DEV_Delay_ms(100);
-    // OLED_1in3_C_Init();
-    // OLED_1in3_C_Clear();
 
     char userName[8] = "<user>"; // default username
-    // selectSD();
-    if(!find_in_config("username=", userName, sizeof(userName))){ // not working right now
+    if(!find_in_config("username=", userName, sizeof(userName))){ // this is more a check that the SD card is working now
         strcpy(userName, "<user>"); // default username if not found
     }
     printf("Username: %s\n", userName);
@@ -156,32 +161,54 @@ int main(void)
     }
 
     int maxToLog = supportedPIDs < 6 ? supportedPIDs : 6;
-    printf("Please choose a number of PIDs to log (max %d): ", maxToLog);
+    printf("Please choose a number of PIDs to log (max %d):\n", maxToLog);
     fflush(stdout);
     sleep_ms(100);
-    int numToLog = 0;
-    char buf[32];
 
-    if (fgets(buf, sizeof(buf), stdin)) {
-        sscanf(buf, "%d", &numToLog);
+    // enter a wait for input state
+    int numToLog = 0;
+    do {
+    int lineReady = 0;
+    while(!lineReady){
+        if(nonBlockRead() == 1){ // this means an entire line has been read
+            lineReady = 1;
+            numToLog = atoi(inputBuffer); // attempt to convert to int
+        }
+        sleep_ms(10);
     }
-    while (numToLog < 1 || numToLog > maxToLog) {
-        printf("Invalid number. Please choose a number between 1 and %d: ", maxToLog);
-        scanf("%d", &numToLog);
+    if (numToLog < 1 || numToLog > maxToLog) { // catch any wrong numbers or char converts
+            printf("Invalid number. Please choose a number between 1 and %d: \n", maxToLog);
     }
+    } while (numToLog < 1 || numToLog > maxToLog);
+
 
     PIDEntry chosenPIDS[numToLog];
     int count = 0;
-    while (count < numToLog) {
+    
+    while(count< numToLog){
         printPIDs(supportedPIDArray, current);
         printf("Remaining PIDs to choose: %d/%d\n", count, numToLog);
+        fflush(stdout);
         int inp = 0;
-        scanf("%d", &inp);
-        if (inp > 0 && inp < dirSize){
-            chosenPIDS[count] = supportedPIDArray[inp - 1];
-            count++;
+        int lineReady = 0;
+        while (!lineReady) {
+            if(nonBlockRead() == 1){
+                lineReady = 1;
+                inp = atoi(inputBuffer); // attempt to convert to int
+                }
+                sleep_ms(10);
+            }
+            if (inp < 1 || inp > supportedPIDs){
+                printf("Please select a valid PID.\n");
+            } else{
+                chosenPIDS[count] = supportedPIDArray[inp - 1];
+                count++;
         }
     }
+
+
+
+
     char header[256] = "Timestamp";
     char * buffer = malloc(64);
     for (int i = 0; i < numToLog; i++){
@@ -194,7 +221,7 @@ int main(void)
     printf("CSV Header: %s\n", header);
     free(buffer);
 
-    printf("Enter a name for the log file (without extension):\n");
+    printf("Enter a name for the log file (without extension, max 32 chars):\n");
     char fileName[32];
     scanf("%31s", fileName);
     strcat(fileName,".csv");
@@ -218,14 +245,12 @@ int main(void)
         return -1; // exit with error
     }
 
-    printf("Ready to begin logging, press enter to begin...");
+    printf("Ready to begin logging, press any key to begin...");
     getchar();
+    printf("Logging started, you may now disconnect without affecting logging (if power is not through USB).\n");
 
-   
     absolute_time_t start = get_absolute_time();
     int currentPID = 0;
-    //         int mainVal = 0;
-            // bool sdUsed = false;
     char * recordBuffer = calloc(256, sizeof(char));
     while (1) {
         absolute_time_t now = get_absolute_time();   
@@ -264,28 +289,5 @@ int main(void)
     }
     close_File(csvFile);
     printf("Logging completed. Data saved to %s\n", fileName);
-    //         free(chosenPIDS);
-    //         free(strBuffer);
-    //         free(fileName);
-    //         break;
-
-        // case 3: // quit
-        //     printf("Exiting...\n");
-        //     for (int i = 0; i < numOfScreens; i++) {
-        //         free(screens[i]); // free the screen names
-        //     }
-        //     free(screens); // free the screens memory
-        //     OLED_1in3_C_Clear();
-        //     OLED_1in3_C_Display(BlackImage);
-        //     DEV_Module_Exit();
-        //     free(BlackImage);
-        //     return 0; // exit the program
-
-        // default:
-        //     printf("Entering car screen...\n");
-        //     // based on the choice, can determine which car to show
-        //     break;
-        // }
-    // }
     return 0;
 }

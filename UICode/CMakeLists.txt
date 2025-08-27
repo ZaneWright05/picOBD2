@@ -49,7 +49,7 @@ lib/CAN/CAN_DEV_Config.c
 
 # enable usb output, disable uart output
 pico_enable_stdio_usb(UICode 1)
-pico_enable_stdio_uart(UICode 1)
+pico_enable_stdio_uart(UICode 0)
 
 # create map/bin/hex/uf2 file etc.
 pico_add_extra_outputs(UICode)
