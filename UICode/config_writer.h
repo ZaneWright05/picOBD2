@@ -11,4 +11,5 @@ void print_config();
 int create_csv_file(const char * fileName, const char * csvHeader);
 bool log_record(const char* record, FIL* fil);
 bool close_File(FIL* fil);
+bool is_valid_FS();
 FIL* open_File(char* filename);

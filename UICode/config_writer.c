@@ -5,6 +5,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// static FATFS checkFs;
+bool is_valid_FS(){
+    FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        printf("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+        f_unmount("");
+        return false;
+    }
+    f_unmount("");
+    return true;
+}
+
 bool write_to_config(const char * msg){
     FATFS fs;
     FRESULT fr = f_mount(&fs, "", 1);
