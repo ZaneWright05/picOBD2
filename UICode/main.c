@@ -32,6 +32,15 @@ typedef struct Input {
 
 State state = IDLE;
 
+#define MAX_LOG_PIDS 6
+#define MAX_FILENAME_LEN 64
+
+typedef struct {
+    char fileName[MAX_FILENAME_LEN];
+    int numToLog;
+    PIDEntry chosenPIDs[MAX_LOG_PIDS]; 
+} InputConfig;
+
 Input leds[4] = {
     {TERMINAL, false, GREEN_PIN}, 
     {PICO, false, BLUE_PIN}, 
@@ -217,7 +226,7 @@ void select_next(){
 
 absolute_time_t lastPress;
 bool INTERRUPTED = false;
-void print(){
+void print(uint gpio, uint32_t events) {
     absolute_time_t now = get_absolute_time();
     if(absolute_time_diff_us(lastPress, now) > 200000){
         // printf("interrupt detected\n");
@@ -227,16 +236,149 @@ void print(){
     }
 }
 
-// bool any_selected(){
-//     for(int i = 0; i < 3; i++){
-//         if(leds[i].selected){
-//             return true;
-//         }
-//     }
-//     return false;
-// }
+absolute_time_t last_event;
+absolute_time_t press_start;
+bool short_press = false;
+bool long_press = false;
 
-int log_loop(FIL* csvFile, int numToLog, PIDEntry* chosenPIDS){
+void button_event(uint gpio, uint32_t event){
+    absolute_time_t now = get_absolute_time();
+
+    if (absolute_time_diff_us(last_event, now) < 50000){
+        return;
+    }
+    last_event = now;
+
+    if(event & GPIO_IRQ_EDGE_FALL){
+        // printf("Button pressed\n");
+        press_start = now;
+    }
+
+    if(event & GPIO_IRQ_EDGE_RISE){
+        // printf("Button released\n");
+        uint64_t time_held = absolute_time_diff_us(press_start, now);
+        if(time_held < 500000){
+            short_press = true;
+        }
+        else{
+            long_press = true;
+        }
+    }
+}
+
+int get_terminal_input(InputConfig *IC){
+    int supportedPIDs = scanForPIDs();
+    PIDEntry supportedPIDArray[supportedPIDs];
+    int current = 0;
+
+    for (int i = 0; i < dirSize; i++) {
+        if (pid_Dir[i].supported) {
+            supportedPIDArray[current] = pid_Dir[i];
+            current++;
+        }
+    }
+
+    int maxToLog = supportedPIDs < 6 ? supportedPIDs : 6;
+    printf("Please choose a number of PIDs to log (max %d):\n", maxToLog);
+    fflush(stdout);
+    // sleep_ms(100);
+
+    // enter a wait for input state
+    // int numToLog = 0;
+    do {
+    int lineReady = 0;
+    while(!lineReady){
+        if(nonBlockRead() == 1){ // this means an entire line has been read
+            lineReady = 1;
+            IC->numToLog = atoi(inputBuffer); // attempt to convert to int
+        }
+        sleep_ms(10);
+    }
+    if (IC->numToLog < 1 || IC->numToLog > maxToLog) { // catch any wrong numbers or char converts
+            printf("Invalid number. Please choose a number between 1 and %d: \n", maxToLog);
+    }
+    } while (IC->numToLog < 1 || IC->numToLog > maxToLog);
+
+    // chosenPIDS = malloc(numToLog * sizeof(PIDEntry));
+    // PIDEntry chosenPIDS[numToLog];
+    int count = 0;
+
+    while(count< IC->numToLog){
+        printPIDs(supportedPIDArray, current);
+        printf("Remaining PIDs to choose: %d/%d\n", count, IC->numToLog);
+        fflush(stdout);
+        int inp = 0;
+        int lineReady = 0;
+        while (!lineReady) {
+            if(nonBlockRead() == 1){
+                lineReady = 1;
+                inp = atoi(inputBuffer); // attempt to convert to int
+                }
+                sleep_ms(10);
+            }
+            if (inp < 1 || inp > supportedPIDs){
+                printf("Please select a valid PID.\n");
+            } else{
+                IC->chosenPIDs[count] = supportedPIDArray[inp - 1];
+                count++;
+        }
+    }
+
+    char header[256] = "Timestamp";
+    char buffer[64];
+    for (int i = 0; i < IC->numToLog; i++){
+        PIDEntry entry = IC->chosenPIDs[i];
+        printf("Chosen PID %02X (%s)\n", entry.pid, entry.name);
+        snprintf(buffer, sizeof(buffer), ",%s", entry.name);
+        strncat(header, buffer, sizeof(header) - strlen(header) - 1);
+    }
+
+    printf("CSV Header: %s\n", header);
+    // free(buffer);
+
+    printf("Enter a name for the log file (without extension, max 32 chars):\n");
+
+    int lineReady = 0;
+    while (!lineReady) {
+        if(nonBlockRead() == 1){
+            strncpy(IC->fileName, inputBuffer, MAX_FILENAME_LEN - 5);
+            IC->fileName[MAX_FILENAME_LEN - 5] = '\0'; // safety
+            lineReady = 1;
+        }
+        sleep_ms(10);
+    }
+
+    strcat(IC->fileName,".csv");
+
+    int result = create_csv_file(IC->fileName, header);
+    while(result == -2){
+        printf("File %s already exists. Please choose a different name.\n", IC->fileName);
+        lineReady = 0;
+        while (!lineReady) {
+            if(nonBlockRead() == 1){
+                strncpy(IC->fileName, inputBuffer, MAX_FILENAME_LEN - 5);
+                IC->fileName[MAX_FILENAME_LEN - 5] = '\0'; // safety
+                lineReady = 1;
+            }
+            sleep_ms(10);
+        }
+        strcat(IC->fileName,".csv");
+        result = create_csv_file(IC->fileName, header); // try to create the CSV file again
+    }
+    if (result < 0) {
+        printf("Failed to create CSV file.\n");
+        return -1;
+    }
+    printf("Log file will be: %s\n", IC->fileName);
+    return 0;
+}
+
+int log_loop(char* filename, int numToLog, PIDEntry* chosenPIDS){
+    FIL * csvFile = open_File(filename);
+    if (!csvFile) {
+        printf("Failed to open CSV file for logging.\n");
+        return -1; // exit with error
+    }
     absolute_time_t start = get_absolute_time();
     int currentPID = 0;
     char * recordBuffer = calloc(256, sizeof(char));
@@ -245,7 +387,6 @@ int log_loop(FIL* csvFile, int numToLog, PIDEntry* chosenPIDS){
     if(numToLog < 3){
         freqRate = 500000; // if more than 3 PIDs, log every 500ms
     }
-    INTERRUPTED = false;
     while (1) {
         absolute_time_t now = get_absolute_time();   
         uint64_t elapsed_time = absolute_time_diff_us(start, now);
@@ -275,7 +416,9 @@ int log_loop(FIL* csvFile, int numToLog, PIDEntry* chosenPIDS){
             log_record(record, csvFile);
             memset(recordBuffer, 0, 256);
             currentPID = 0;
-            if(INTERRUPTED){ // wait till next log to stop
+            if(short_press || long_press){ // wait till next log to stop
+                short_press = false;
+                long_press = false;
                 break;
             }
             time += freqRate; // convert microseconds to seconds
@@ -292,7 +435,7 @@ void init_all(){
     gpio_init(15);
     gpio_set_dir(15, GPIO_IN);
     gpio_pull_up(15);
-    gpio_set_irq_enabled_with_callback(15, GPIO_IRQ_EDGE_RISE, true, &print);
+    gpio_set_irq_enabled_with_callback(15, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &button_event);
 
     gpio_init(RED_PIN);
     gpio_set_dir(RED_PIN, GPIO_OUT);
@@ -312,11 +455,14 @@ int main(void) {
     lastFlash = get_absolute_time();
     absolute_time_t SD_checked = get_absolute_time();
     bool SD_available = false;
-    char fileName[32];
-    int numToLog = 0;
-    PIDEntry* chosenPIDS;
+    // char* fileName;
+    // int* numToLog;
+    // PIDEntry* chosenPIDS;
+    InputConfig IC;
+
     while(1){
         handle_leds();
+        
         switch (state)
         {
         case IDLE:
@@ -324,16 +470,39 @@ int main(void) {
                 SD_checked = get_absolute_time();
                 SD_available = is_valid_FS(); // every 500ms check if the SD card is available, without this no logging can occur
             }
+
             if(!SD_available) {
                 for(int i = 0; i < 4; i++){
                     leds[i].active = false;
                     // leds[i].selected = false;
                     // leds[i].isLit = false;
                 }
-                selectedIndex = -1;
+                // selectedIndex = -1;
                 leds[3].active = true; // error if there is no SD
                 break; // don't bother checking others
             }
+
+            if(short_press){ // check for a button press
+                select_next();
+                short_press = false;
+            }  
+
+            if(long_press){
+                long_press = false;
+                if(leds[selectedIndex].inputSource == TERMINAL){
+                    printf("Selected terminal output");
+                    state = TERMINAL;
+                } else if(leds[selectedIndex].inputSource == SD){
+                    printf("Selected SD card output");
+                    state = SD;
+                } else if(leds[selectedIndex].inputSource == PICO){
+                    printf("Selected USB output");
+                    state = PICO;
+                }
+                selectedIndex = -1;
+                break;
+            }
+
             if(stdio_usb_connected()){
                 if(!leds[0].active){
                     printf("USB connected\n");
@@ -348,8 +517,10 @@ int main(void) {
                     // validInputs++;
                 }
             } else{
-                // validInputs--;
-                // gpio_put(leds[0].ledPin, 0);
+                if(leds[0].active){ // move off of this option
+                    leds[0].active = false;
+                    select_next();
+                }
                 leds[0].active = false;
                 leds[3].active = !check_inputs();
             }
@@ -365,34 +536,65 @@ int main(void) {
                 leds[3].active = !check_inputs();
             }
             break;
+
+        case TERMINAL:
+            for(int i = 0; i < 4; i++){ // clears leds and enables TERMINAL LED
+                if(leds[i].inputSource == TERMINAL){
+                    gpio_put(leds[i].ledPin, 1);
+                    leds[i].active = true;
+                }else {
+                    gpio_put(leds[i].ledPin, 0);
+                    leds[i].active = false;
+                }
+            }
+            //extract from terminal
+            int result = get_terminal_input(&IC);
+            printf("Filename: %s\n", IC.fileName); // need to fix
+            printf("Num to log: %d\n", IC.numToLog);
+            for (int i = 0; i < IC.numToLog; i++) {
+                printf("PID %d: %02X (%s)\n", i, IC.chosenPIDs[i].pid, IC.chosenPIDs[i].name);
+            }
+            if(result == -1){
+                state = ERROR;
+                break;
+            }
+            state = LOGGING;
+            break;
+
+        case SD:
+            for(int i = 0; i < 4; i++){ // clears leds and enables SD LED
+                if(leds[i].inputSource == SD){
+                    gpio_put(leds[i].ledPin, 1);
+                    leds[i].active = true;
+                }else {
+                    gpio_put(leds[i].ledPin, 0);
+                    leds[i].active = false;
+                }
+            }
+            // extract from config
+            break;
+
+        case PICO:
+            break;
+
+        case LOGGING:
+            int log_result = log_loop(IC.fileName, IC.numToLog, IC.chosenPIDs);
+            if (log_result == -1) {
+                state = ERROR;
+            }else{
+                state = IDLE;
+            }
+            break;
+
+        case ERROR:
+            printf("An error occurred.\n");
+            gpio_put(leds[3].ledPin, 1);
+            break;
         default:
             break;
         }
     }
 }
-
-
-// int main(void)
-// {   
-//     init_all();
-
-//     // gpio_put(RED_PIN, 1);
-//     while(!stdio_usb_connected()) {
-//         sleep_ms(100); // wait for USB to be connected
-//     }
-    
-//     // gpio_put(RED_PIN, 0);
-//     // gpio_put(GREEN_PIN, 1);
-//     // gpio_put(BLUE_PIN, 1);
-//     // gpio_put(YELLOW_PIN, 1);
-
-    
-
-//     char userName[8] = "<user>"; // default username
-//     if(!find_in_config("username=", userName, sizeof(userName))){ // this is more a check that the SD card is working now
-//         strcpy(userName, "<user>"); // default username if not found
-//     }
-//     printf("Username: %s\n", userName);
 
 //     int supportedPIDs = scanForPIDs();
 //     PIDEntry supportedPIDArray[supportedPIDs];
@@ -496,158 +698,8 @@ int main(void) {
 //     return 0;
 // }
 
-// int main(void){
-//     init_all();
-//     lastFlash = get_absolute_time();
-//     while(1){
-//         led_flash();
-//         switch (state)
-//         {
-//         case IDLE:
-//             if(stdio_usb_connected()){
-//                 if(!inputs[0].isActive){
-//                     gpio_put(inputs[0].ledPin, 1);
-//                     inputs[0].isActive = true;
-//                     validInputs++;
-//                 }
-//             } else{
-//                 validInputs--;
-//                 gpio_put(inputs[0].ledPin, 0);
-//                 inputs[0].isActive = false;
-//             }
-//             break;
-//         default:
-//             break;
-//         }
-//     }
-// }
 
 
-// int main(void)
-// {   
-//     init_all();
-
-//     gpio_put(RED_PIN, 1);
-//     while(!stdio_usb_connected()) {
-//         sleep_ms(100); // wait for USB to be connected
-//     }
-    
-//     gpio_put(RED_PIN, 0);
-//     gpio_put(GREEN_PIN, 1);
-//     gpio_put(BLUE_PIN, 1);
-//     gpio_put(YELLOW_PIN, 1);
-
-    
-
-//     char userName[8] = "<user>"; // default username
-//     if(!find_in_config("username=", userName, sizeof(userName))){ // this is more a check that the SD card is working now
-//         strcpy(userName, "<user>"); // default username if not found
-//     }
-//     printf("Username: %s\n", userName);
-
-//     int supportedPIDs = scanForPIDs();
-//     PIDEntry supportedPIDArray[supportedPIDs];
-//     int current = 0;
-//     for (int i = 0; i < dirSize; i++) {
-//         if (pid_Dir[i].supported) {
-//             supportedPIDArray[current] = pid_Dir[i];
-//             current++;
-//         }
-//     }
-
-//     int maxToLog = supportedPIDs < 6 ? supportedPIDs : 6;
-//     printf("Please choose a number of PIDs to log (max %d):\n", maxToLog);
-//     fflush(stdout);
-//     sleep_ms(100);
-
-//     // enter a wait for input state
-//     int numToLog = 0;
-//     do {
-//     int lineReady = 0;
-//     while(!lineReady){
-//         if(nonBlockRead() == 1){ // this means an entire line has been read
-//             lineReady = 1;
-//             numToLog = atoi(inputBuffer); // attempt to convert to int
-//         }
-//         sleep_ms(10);
-//     }
-//     if (numToLog < 1 || numToLog > maxToLog) { // catch any wrong numbers or char converts
-//             printf("Invalid number. Please choose a number between 1 and %d: \n", maxToLog);
-//     }
-//     } while (numToLog < 1 || numToLog > maxToLog);
-
-
-//     PIDEntry chosenPIDS[numToLog];
-//     int count = 0;
-    
-//     while(count< numToLog){
-//         printPIDs(supportedPIDArray, current);
-//         printf("Remaining PIDs to choose: %d/%d\n", count, numToLog);
-//         fflush(stdout);
-//         int inp = 0;
-//         int lineReady = 0;
-//         while (!lineReady) {
-//             if(nonBlockRead() == 1){
-//                 lineReady = 1;
-//                 inp = atoi(inputBuffer); // attempt to convert to int
-//                 }
-//                 sleep_ms(10);
-//             }
-//             if (inp < 1 || inp > supportedPIDs){
-//                 printf("Please select a valid PID.\n");
-//             } else{
-//                 chosenPIDS[count] = supportedPIDArray[inp - 1];
-//                 count++;
-//         }
-//     }
-
-//     char header[256] = "Timestamp";
-//     char * buffer = malloc(64);
-//     for (int i = 0; i < numToLog; i++){
-//         PIDEntry entry = chosenPIDS[i];
-//         printf("Chosen PID %02X (%s)\n", entry.pid, entry.name);
-//         snprintf(buffer, 64, ",%s", entry.name);
-//         strcat(header, buffer);
-//     }
-
-//     printf("CSV Header: %s\n", header);
-//     free(buffer);
-
-//     printf("Enter a name for the log file (without extension, max 32 chars):\n");
-//     // TODO: use non blocking input here
-//     char fileName[32];
-//     int filePos;
-//     int lineReady = 0;
-//     while (!lineReady) {
-//         if(nonBlockRead() == 1){
-//             strncpy(fileName, inputBuffer, sizeof(fileName) - 1);
-//             fileName[sizeof(fileName) - 1] = '\0'; // safety
-//             lineReady = 1;
-//         }
-//         sleep_ms(10);
-//     }
-
-//     strcat(fileName,".csv");
-//     int result = create_csv_file(fileName, header);
-//     while(result == -2){
-//         printf("File %s already exists. Please choose a different name.\n", fileName);
-//         lineReady = 0;
-//         while (!lineReady) {
-//             if(nonBlockRead() == 1){
-//                 strncpy(fileName, inputBuffer, sizeof(fileName) - 1);
-//                 fileName[sizeof(fileName) - 1] = '\0'; // safety
-//                 lineReady = 1;
-//             }
-//             sleep_ms(10);
-//         }
-//         strcat(fileName,".csv");
-//         result = create_csv_file(fileName, header); // try to create the CSV file again
-//     }
-//     if (result < 0) {
-//         printf("Failed to create CSV file.\n");
-//         return -1;
-//     }
-//     printf("Log file will be: %s\n", fileName);
 
 //     FIL* csvFile = open_File(fileName);
 //     if (!csvFile) {
