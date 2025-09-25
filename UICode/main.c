@@ -22,7 +22,6 @@
 #define YELLOW_PIN 19 // sd
 
 typedef enum State {IDLE, TERMINAL, PICO, SD, LOGGING, ERROR} State;
-typedef enum Lighting {ON, OFF, FLASH} Lighting;
 
 typedef struct Input {
     State inputSource;
@@ -447,10 +446,11 @@ int main(void) {
     // int* numToLog;
     // PIDEntry* chosenPIDS;
     InputConfig IC;
+    int errSource = -1; // -1 is no error
 
     while(1){
         handle_leds();
-        
+        char errorMsg[128] = {0};
         switch (state)
         {
         case IDLE:
@@ -565,12 +565,18 @@ int main(void) {
             char pidCountStr[8]; // this should be an int and is <6 so 8 chars is plenty
             if(!find_in_config("count=", pidCountStr, sizeof(pidCountStr))){
                 printf("Failed to find count in config\n");
+                snprintf(errorMsg, sizeof(errorMsg), "Failed to find count in config");
+                append_to_error(errorMsg);
+                errSource = 1; // config setup error
                 state = ERROR;
                 break;
             }
             int numFromFile = atoi(pidCountStr);
             if(numFromFile <= 0){ // a negative or 0 is invalid (atoi sets to 0 on error)
                 printf("Invalid count in config\n");
+                snprintf(errorMsg, sizeof(errorMsg), "Invalid count in config");
+                append_to_error(errorMsg);
+                errSource = 1;
                 state = ERROR;
                 break;
             }
@@ -584,6 +590,9 @@ int main(void) {
             char pidBuffer[128];
             if(!find_in_config("PIDs=", pidBuffer, sizeof(pidBuffer))){
                 printf("Failed to find PIDs in config\n");
+                snprintf(errorMsg, sizeof(errorMsg), "Failed to find PIDs in config");
+                append_to_error(errorMsg);
+                errSource = 1;
                 state = ERROR;
                 break;
             }
@@ -599,8 +608,11 @@ int main(void) {
                     if(pid_Dir[i].pid == pid){
                         if(!pid_Dir[i].supported){
                             printf("PID %02X is not supported\n", pid);
+                            snprintf(errorMsg, sizeof(errorMsg), "PID %02X is not supported", pid);
+                            append_to_error(errorMsg);
                             state = ERROR;
-                            found = false;
+                            errSource = 2; // PID not supported
+                            found = true; // avoid writing as an unknown PID
                             break;
                         }
                         found = true;
@@ -609,7 +621,10 @@ int main(void) {
                     }
                 }
                 if(!found){
-                    printf("Not a supported PID: %02X\n", pid);
+                    printf("Not a known PID: %02X\n", pid);
+                    snprintf(errorMsg, sizeof(errorMsg), "Not a known PID: %02X", pid);
+                    errSource = 1; // config setup error
+                    append_to_error(errorMsg);
                     state = ERROR;
                     break;
                 }
@@ -620,6 +635,8 @@ int main(void) {
             char filename[64];
             if(!find_in_config("filename=", filename, sizeof(filename))){
                 printf("Failed to find filename in config\n");
+                snprintf(errorMsg, sizeof(errorMsg), "Failed to find filename in config");
+                append_to_error(errorMsg);
                 state = ERROR;
                 break;
             }
@@ -650,10 +667,41 @@ int main(void) {
         case ERROR:
             printf("An error occurred.\n");
             gpio_put(leds[3].ledPin, 1);
-            break;
-        default:
-            break;
-        }
+            switch(errSource){
+                case 1: // a config file error
+                    snprintf(errorMsg, sizeof(errorMsg), "Config file error: an example file names config.txt is available on the GitHub page");
+                    append_to_error(errorMsg);
+                break;
+                case 2: // PID unsupported by car
+                    snprintf(errorMsg, sizeof(errorMsg), "PID unsupported by car below is the list of supported PIDs:\n");
+                    append_to_error(errorMsg);
+                    scanForPIDs();
+                    char pidStr[256];
+                    bool first = false;
+                    for(int i = 0; i < dirSize; i++){
+                        PIDEntry entry = pid_Dir[i];
+                        if(entry.supported){
+                            char temp[64];
+                            if(first){
+                                snprintf(temp, sizeof(temp), "%s (%02X)\n", entry.name, entry.pid);
+                                first = false;
+                            }else{
+                                snprintf(temp, sizeof(temp), ",%s (%02X)\n", entry.name, entry.pid);
+                            }
+                            strncat(pidStr, temp, sizeof(pidStr) - strlen(pidStr) - 1);
+                        }
+                    }
+                    append_to_error(pidStr);
+                break;
+                default:
+                    snprintf(errorMsg, sizeof(errorMsg), "Unknown error occurred");
+                    append_to_error(errorMsg);
+                break;
+            }
+            }
+            while(1){ // current solution is to reset the device
+                sleep_ms(100);
+            }
     }
 }
 

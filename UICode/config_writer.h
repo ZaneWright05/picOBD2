@@ -13,3 +13,4 @@ bool log_record(const char* record, FIL* fil);
 bool close_File(FIL* fil);
 bool is_valid_FS();
 FIL* open_File(char* filename);
+int append_to_error(char* errMsg);

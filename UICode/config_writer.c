@@ -309,3 +309,22 @@ bool log_record(char* record, FIL* fil) {
     }
     return true;
 }
+
+int append_to_error(char* errMsg){
+    FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        printf("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+        return -1;
+    }
+    FIL fil;
+    fr = f_open(&fil, "error.log", FA_OPEN_APPEND | FA_WRITE);
+    if (FR_OK != fr){
+        printf("f_open error: %s (%d)\n", FRESULT_str(fr), fr);
+        return -1;
+    }
+    f_printf(&fil, "%s\n", errMsg);
+    f_close(&fil);
+    f_unmount("");
+    return 0;
+}
