@@ -224,24 +224,12 @@ void select_next(){
     }
 }
 
-absolute_time_t lastPress;
-bool INTERRUPTED = false;
-void print(uint gpio, uint32_t events) {
-    absolute_time_t now = get_absolute_time();
-    if(absolute_time_diff_us(lastPress, now) > 200000){
-        // printf("interrupt detected\n");
-        lastPress = now;
-        INTERRUPTED = true;
-        select_next();
-    }
-}
-
 absolute_time_t last_event;
 absolute_time_t press_start;
 bool short_press = false;
 bool long_press = false;
 
-void button_event(uint gpio, uint32_t event){
+    void button_event(uint gpio, uint32_t event){
     absolute_time_t now = get_absolute_time();
 
     if (absolute_time_diff_us(last_event, now) < 50000){
@@ -490,13 +478,13 @@ int main(void) {
             if(long_press){
                 long_press = false;
                 if(leds[selectedIndex].inputSource == TERMINAL){
-                    printf("Selected terminal output");
+                    printf("Selected terminal output\n");
                     state = TERMINAL;
                 } else if(leds[selectedIndex].inputSource == SD){
-                    printf("Selected SD card output");
+                    printf("Selected SD card output\n");
                     state = SD;
                 } else if(leds[selectedIndex].inputSource == PICO){
-                    printf("Selected USB output");
+                    printf("Selected USB output\n");
                     state = PICO;
                 }
                 selectedIndex = -1;
@@ -504,6 +492,7 @@ int main(void) {
             }
 
             if(stdio_usb_connected()){
+                // printf("USB connected\n");
                 if(!leds[0].active){
                     printf("USB connected\n");
                     // gpio_put(leds[0].ledPin, 1);
@@ -571,17 +560,89 @@ int main(void) {
                     leds[i].active = false;
                 }
             }
-            // extract from config
+
+
+            char pidCountStr[8]; // this should be an int and is <6 so 8 chars is plenty
+            if(!find_in_config("count=", pidCountStr, sizeof(pidCountStr))){
+                printf("Failed to find count in config\n");
+                state = ERROR;
+                break;
+            }
+            int numFromFile = atoi(pidCountStr);
+            if(numFromFile <= 0){ // a negative or 0 is invalid (atoi sets to 0 on error)
+                printf("Invalid count in config\n");
+                state = ERROR;
+                break;
+            }
+            if(numFromFile > MAX_LOG_PIDS){
+                numFromFile = MAX_LOG_PIDS;
+                break;
+            }
+            IC.numToLog = numFromFile;
+
+
+            char pidBuffer[128];
+            if(!find_in_config("PIDs=", pidBuffer, sizeof(pidBuffer))){
+                printf("Failed to find PIDs in config\n");
+                state = ERROR;
+                break;
+            }
+            int count = 0;
+            char * token = strtok(pidBuffer, ",");
+            scanForPIDs();
+            while(token && count < IC.numToLog){
+                uint8_t pid = (uint8_t)strtol(token, NULL, 16);
+                printf("Looking for PID :%02x\n", pid);
+                // int index = 0;
+                bool found = false;
+                for(int i = 0; i<dirSize; i++){
+                    if(pid_Dir[i].pid == pid){
+                        if(!pid_Dir[i].supported){
+                            printf("PID %02X is not supported\n", pid);
+                            state = ERROR;
+                            found = false;
+                            break;
+                        }
+                        found = true;
+                        IC.chosenPIDs[count++] = pid_Dir[i];
+                        break;
+                    }
+                }
+                if(!found){
+                    printf("Not a supported PID: %02X\n", pid);
+                    state = ERROR;
+                    break;
+                }
+                token = strtok(NULL, ",");
+            }
+            
+
+            char filename[64];
+            if(!find_in_config("filename=", filename, sizeof(filename))){
+                printf("Failed to find filename in config\n");
+                state = ERROR;
+                break;
+            }
+            strncpy(IC.fileName, filename, sizeof(IC.fileName));
+
+            state = LOGGING;
             break;
 
         case PICO:
             break;
 
         case LOGGING:
+            printf("Log file will be: %s\n", IC.fileName);
+            printf("Num to log: %d\n", IC.numToLog);
+            for (int i = 0; i < IC.numToLog; i++) {
+                printf("PID %d: %02X (%s)\n", i, IC.chosenPIDs[i].pid, IC.chosenPIDs[i].name);
+            }
+
             int log_result = log_loop(IC.fileName, IC.numToLog, IC.chosenPIDs);
             if (log_result == -1) {
                 state = ERROR;
             }else{
+                printf("Logging complete.\n");
                 state = IDLE;
             }
             break;
@@ -695,67 +756,5 @@ int main(void) {
 //     printf("Logging started, you may now disconnect without affecting logging (if power is not through USB).\n");
 
 //     log_loop(csvFile, numToLog, chosenPIDS);
-//     return 0;
-// }
-
-
-
-
-//     FIL* csvFile = open_File(fileName);
-//     if (!csvFile) {
-//         printf("Failed to open CSV file for logging.\n");
-//         return -1; // exit with error
-//     }
-
-//     printf("Ready to begin logging, press any key to begin...");
-//     getchar();
-//     printf("Logging started, you may now disconnect without affecting logging (if power is not through USB).\n");
-
-//     absolute_time_t start = get_absolute_time();
-//     int currentPID = 0;
-//     char * recordBuffer = calloc(256, sizeof(char));
-//     uint64_t time = 0;
-//     uint64_t freqRate = 1000000; // default to 1 second
-//     if(numToLog < 3){
-//         freqRate = 500000; // if more than 3 PIDs, log every 500ms
-//     }
-//     INTERRUPTED = false;
-//     while (1) {
-//         absolute_time_t now = get_absolute_time();   
-//         uint64_t elapsed_time = absolute_time_diff_us(start, now);
-//         if (currentPID < numToLog) {
-//             PIDEntry entry = chosenPIDS[currentPID];
-//             if (entry.supported) {
-//                 char valueBuffer[32];
-//                 int val = query_CAN(entry);
-//                 // int val = 100;
-//                 snprintf(valueBuffer, 32, ",%d", val);
-//                 strncat(recordBuffer, valueBuffer, 256 - strlen(recordBuffer) - 1);
-//                 currentPID++;
-//             }
-//         }
-//         if (elapsed_time >= freqRate) { // log every second
-//             start = now;
-//             char record[256];
-//             if (currentPID < numToLog) {
-//                 for (int i = currentPID; i < numToLog; i++) {
-//                     strncat(recordBuffer, ",", 256 - strlen(recordBuffer) - 1); // fill with empty values
-//                 }
-//             }
-//             snprintf(record, sizeof(record), "%llu", time);
-//             strncat(record, recordBuffer, 256 - strlen(recordBuffer) - 1);
-//             strncat(record, "\n", 256 - strlen(record) - 1);
-//             printf("%s", record);
-//             log_record(record, csvFile);
-//             memset(recordBuffer, 0, 256);
-//             currentPID = 0;
-//             if(INTERRUPTED){ // wait till next log to stop
-//                 break;
-//             }
-//             time += freqRate; // convert microseconds to seconds
-//         }
-//     }
-//     close_File(csvFile);
-//     printf("Logging completed. Data saved to %s\n", fileName);
 //     return 0;
 // }
